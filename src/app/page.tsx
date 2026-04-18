@@ -1,17 +1,24 @@
-import { Suspense } from "react";
 import { DashboardView } from "@/components/dashboard-view";
 import { SiteShell } from "@/components/site-shell";
+import { listRequests } from "@/lib/server/request-repository";
 
-export default function Home() {
+export const runtime = "nodejs";
+
+export default async function Home({
+  searchParams,
+}: Readonly<{
+  searchParams?: Promise<{ request?: string }>;
+}>) {
+  const requests = listRequests();
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+
   return (
     <SiteShell
       eyebrow="Live Dashboard"
-      title="ProcurePilot helps SME buyers source critical items faster during disruption."
-      subtitle="Compare suppliers, surface risk, adjust decision weights, find substitutes, and generate a clean recommendation narrative in under a minute."
+      title="ProcurePilot keeps procurement simple while the Lua agent does the heavy lifting."
+      subtitle="Start with one plain-English procurement request. The live Lua agent will ask follow-up questions, build the shortlist, and open a live negotiation room when you are ready."
     >
-      <Suspense fallback={<div className="h-40 rounded-[28px] bg-white/70" />}>
-        <DashboardView />
-      </Suspense>
+      <DashboardView requests={requests} initialRequestId={resolvedSearchParams?.request} />
     </SiteShell>
   );
 }

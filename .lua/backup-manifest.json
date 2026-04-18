@@ -1,0 +1,218 @@
+{
+  "lastHash": "97fd0b57b217fa2596e0647fe3bc77a8958e146c308ee15ab1cdb12c5efb8285",
+  "lastPushedAt": "2026-04-18T03:52:12.313Z",
+  "files": [
+    {
+      "relativePath": "AGENTS.md",
+      "hash": "e3447d84251880fb"
+    },
+    {
+      "relativePath": "CLAUDE.md",
+      "hash": "336cc4fbf19beaad"
+    },
+    {
+      "relativePath": "data/procurepilot.sqlite",
+      "hash": "059223de65229e5a"
+    },
+    {
+      "relativePath": "data/procurepilot.sqlite-shm",
+      "hash": "7e308cce631f1acd"
+    },
+    {
+      "relativePath": "data/procurepilot.sqlite-wal",
+      "hash": "b3cb05101af36fc8"
+    },
+    {
+      "relativePath": "eslint.config.mjs",
+      "hash": "4f90271217a04ab6"
+    },
+    {
+      "relativePath": "lua.skill.yaml",
+      "hash": "f5fc7a42ce478f25"
+    },
+    {
+      "relativePath": "next.config.ts",
+      "hash": "caab00f8cd52020f"
+    },
+    {
+      "relativePath": "package.json",
+      "hash": "f077b1cae7de01f3"
+    },
+    {
+      "relativePath": "postcss.config.mjs",
+      "hash": "dfac7ac2d86d326a"
+    },
+    {
+      "relativePath": "public/file.svg",
+      "hash": "2b67812c325c199a"
+    },
+    {
+      "relativePath": "public/globe.svg",
+      "hash": "b614b9bf18392595"
+    },
+    {
+      "relativePath": "public/next.svg",
+      "hash": "55995dfad6ecb494"
+    },
+    {
+      "relativePath": "public/vercel.svg",
+      "hash": "f081337b2fee635b"
+    },
+    {
+      "relativePath": "public/window.svg",
+      "hash": "644768c4aaeb4767"
+    },
+    {
+      "relativePath": "README.md",
+      "hash": "d1c5990318f6f967"
+    },
+    {
+      "relativePath": "src/app/api/agent/assess/route.ts",
+      "hash": "f26efc9fe6d5f479"
+    },
+    {
+      "relativePath": "src/app/api/agent/chat/route.ts",
+      "hash": "e7020139ea5c83f6"
+    },
+    {
+      "relativePath": "src/app/api/agent/negotiate/route.ts",
+      "hash": "d1ad2239cebf6346"
+    },
+    {
+      "relativePath": "src/app/api/requests/route.ts",
+      "hash": "38c198044fe644fe"
+    },
+    {
+      "relativePath": "src/app/favicon.ico",
+      "hash": "61d0251ec6968f36"
+    },
+    {
+      "relativePath": "src/app/globals.css",
+      "hash": "7be9332825ba699c"
+    },
+    {
+      "relativePath": "src/app/layout.tsx",
+      "hash": "ba5bb6231985ba44"
+    },
+    {
+      "relativePath": "src/app/page.tsx",
+      "hash": "9a1d9946dffa7d0e"
+    },
+    {
+      "relativePath": "src/app/request/page.tsx",
+      "hash": "6f1f9218b4d0b4d2"
+    },
+    {
+      "relativePath": "src/components/agent-console.tsx",
+      "hash": "1d0a6559f1e8ab3d"
+    },
+    {
+      "relativePath": "src/components/dashboard-view.tsx",
+      "hash": "418dc9fa223f8af0"
+    },
+    {
+      "relativePath": "src/components/request-form.tsx",
+      "hash": "2386e161fc75a3b2"
+    },
+    {
+      "relativePath": "src/components/site-shell.tsx",
+      "hash": "95fc5ca38d3341a2"
+    },
+    {
+      "relativePath": "src/index.ts",
+      "hash": "ebb64f113ab85449"
+    },
+    {
+      "relativePath": "src/lib/catalog-search.ts",
+      "hash": "edc6e9398d042241"
+    },
+    {
+      "relativePath": "src/lib/data.ts",
+      "hash": "4844609807e3c36a"
+    },
+    {
+      "relativePath": "src/lib/format.ts",
+      "hash": "e31109289ca52313"
+    },
+    {
+      "relativePath": "src/lib/lua/live-chat.ts",
+      "hash": "700be6ff033432fe"
+    },
+    {
+      "relativePath": "src/lib/lua/runtime.ts",
+      "hash": "3ed15e3e50f64fb3"
+    },
+    {
+      "relativePath": "src/lib/negotiation.ts",
+      "hash": "114d33898e8f27be"
+    },
+    {
+      "relativePath": "src/lib/procurement-schemas.ts",
+      "hash": "3515e78dc84c9e77"
+    },
+    {
+      "relativePath": "src/lib/scoring.ts",
+      "hash": "fa08a872d6ee246e"
+    },
+    {
+      "relativePath": "src/lib/server/database.ts",
+      "hash": "d2c0a64bb31c6a6f"
+    },
+    {
+      "relativePath": "src/lib/server/request-repository.ts",
+      "hash": "2032a23ecb272996"
+    },
+    {
+      "relativePath": "src/lib/types.ts",
+      "hash": "56625cdcd7c1b57f"
+    },
+    {
+      "relativePath": "src/skills/procurement-ops.skill.ts",
+      "hash": "c1123412c2460388"
+    },
+    {
+      "relativePath": "src/skills/tools/CompareUrgencyImpactTool.ts",
+      "hash": "ea0b28ae1f93496d"
+    },
+    {
+      "relativePath": "src/skills/tools/GetCatalogItemDetailsTool.ts",
+      "hash": "6f2be0211e424686"
+    },
+    {
+      "relativePath": "src/skills/tools/ListCatalogItemsTool.ts",
+      "hash": "a074ada61796514a"
+    },
+    {
+      "relativePath": "src/skills/tools/PrepareProcurementRequestTool.ts",
+      "hash": "612ebb6e3137d0a0"
+    },
+    {
+      "relativePath": "src/skills/tools/RunProcurementAssessmentTool.ts",
+      "hash": "c28e36adf0f82fd3"
+    },
+    {
+      "relativePath": "src/skills/tools/SearchCatalogItemsTool.ts",
+      "hash": "a7d384ffca08eeb5"
+    },
+    {
+      "relativePath": "src/skills/tools/SimulateSupplierNegotiationTool.ts",
+      "hash": "0daaa0c4d66b53e8"
+    },
+    {
+      "relativePath": "src/skills/tools/SystemHealthCheckTool.ts",
+      "hash": "f9610afc6470f879"
+    },
+    {
+      "relativePath": "src/skills/tools/ValidateProcurementRequestTool.ts",
+      "hash": "a350dd8cc2839018"
+    },
+    {
+      "relativePath": "tsconfig.json",
+      "hash": "4895cc660769f124"
+    },
+    {
+      "relativePath": "vercel.json",
+      "hash": "09ccb233849ac5b1"
+    }
+  ]
+}

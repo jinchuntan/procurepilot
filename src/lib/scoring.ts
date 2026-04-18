@@ -1,5 +1,11 @@
-import { buildQuotesForItem, getItemById } from "@/lib/data";
 import {
+  buildQuotesForRequest,
+  getItemById,
+  resolveItemProfileForRequest,
+} from "@/lib/data";
+import {
+  OutcomeMetrics,
+  ProcurementAssessment,
   ProcurementRequest,
   RecommendationBundle,
   RecommendationResult,
@@ -103,7 +109,7 @@ function buildFlags(quote: SupplierQuote, request: ProcurementRequest) {
 export function scoreQuotesForRequest(
   request: ProcurementRequest,
   weights: Weights,
-  quotes = buildQuotesForItem(request.itemId),
+  quotes = buildQuotesForRequest(request),
 ) {
   if (!quotes.length) {
     return [] as ScoredSupplierQuote[];
@@ -174,6 +180,7 @@ export function scoreQuotesForRequest(
 
       return {
         ...quote,
+        totalCost: quote.unitPrice * request.quantity,
         finalScore: clamp(Math.round(final * 10) / 10, 0, 100),
         scoreBreakdown: {
           price: Math.round(price),
@@ -297,9 +304,9 @@ function severityFromScore(score: number): RiskLevel {
 }
 
 export function getRiskInsights(request: ProcurementRequest, scoredQuotes: ScoredSupplierQuote[]) {
-  const item = getItemById(request.itemId);
+  const item = resolveItemProfileForRequest(request);
 
-  if (!item || !scoredQuotes.length) {
+  if (!scoredQuotes.length) {
     return [] as RiskInsight[];
   }
 
@@ -348,11 +355,7 @@ export function getSubstituteSuggestions(
   weights: Weights,
   scoredQuotes: ScoredSupplierQuote[],
 ) {
-  const item = getItemById(request.itemId);
-
-  if (!item) {
-    return [] as SubstituteSuggestion[];
-  }
+  const item = resolveItemProfileForRequest(request);
 
   const topQuote = scoredQuotes[0];
   const shouldSuggest =
@@ -424,4 +427,103 @@ export function buildUrgencyComparison(
     changed: true,
     message: `If urgency moves to critical, the recommendation shifts from ${currentTop.supplierName} to ${criticalTop.supplierName} because lead time and date-fit start to outweigh pure cost savings.`,
   };
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-SG", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function getOutcomeMetrics(
+  request: ProcurementRequest,
+  scoredQuotes: ScoredSupplierQuote[],
+  recommendations: RecommendationBundle,
+): OutcomeMetrics {
+  const sortedCosts = [...scoredQuotes]
+    .map((quote) => quote.totalCost)
+    .sort((left, right) => left - right);
+  const medianCost =
+    sortedCosts[Math.floor(sortedCosts.length / 2)] ??
+    recommendations.overall.supplier.totalCost;
+  const averageLead =
+    scoredQuotes.reduce((sum, quote) => sum + quote.leadTimeDays, 0) /
+    Math.max(scoredQuotes.length, 1);
+  const averageRisk =
+    scoredQuotes.reduce((sum, quote) => sum + quote.riskScore, 0) /
+    Math.max(scoredQuotes.length, 1);
+
+  return {
+    savingsVsMedian: Math.max(
+      0,
+      Math.round(medianCost - recommendations.overall.supplier.totalCost),
+    ),
+    leadTimeImprovementDays: Math.max(
+      0,
+      Math.round(averageLead - recommendations.overall.supplier.leadTimeDays),
+    ),
+    riskReductionPoints: Math.max(
+      0,
+      Math.round(averageRisk - recommendations.overall.supplier.riskScore),
+    ),
+  };
+}
+
+export function buildProcurementAssessment(
+  request: ProcurementRequest,
+  weights: Weights,
+) {
+  const scoredQuotes = scoreQuotesForRequest(request, weights);
+
+  if (!scoredQuotes.length) {
+    throw new Error(`No supplier quotes are available for ${request.itemName}.`);
+  }
+
+  const recommendations = getRecommendationBundle(request, scoredQuotes);
+  const riskInsights = getRiskInsights(request, scoredQuotes);
+  const substitutes = getSubstituteSuggestions(request, weights, scoredQuotes);
+  const urgencyComparison = buildUrgencyComparison(request, weights, scoredQuotes);
+  const outcomeMetrics = getOutcomeMetrics(request, scoredQuotes, recommendations);
+  const daysRemaining = Math.max(daysUntil(request.requiredBy), 1);
+
+  const hasCompliantOption = scoredQuotes.some(
+    (quote) =>
+      quote.reliability >= request.minSupplierRating &&
+      quote.moq <= request.quantity &&
+      quote.leadTimeDays <= daysRemaining &&
+      quote.totalCost <= request.budgetMax,
+  );
+
+  const warnings: string[] = [];
+
+  if (recommendations.overall.supplier.flags.length) {
+    warnings.push(
+      `Top recommendation still carries flags: ${recommendations.overall.supplier.flags.join(", ")}.`,
+    );
+  }
+
+  if (!hasCompliantOption) {
+    warnings.push(
+      "No supplier fully satisfies every hard constraint, so the agent ranked the least-risk fallback options.",
+    );
+  }
+
+  const summary = `Lua Agent recommends ${recommendations.overall.supplier.supplierName} for ${request.itemName} because it gives the best overall mix of price, lead time, reliability, and disruption resilience. Estimated savings versus the shortlist median are ${formatCurrency(
+    outcomeMetrics.savingsVsMedian,
+  )}, with a ${outcomeMetrics.leadTimeImprovementDays}-day lead-time improvement over the average option.`;
+
+  return {
+    generatedAt: new Date().toISOString(),
+    request,
+    summary,
+    scoredQuotes,
+    recommendations,
+    riskInsights,
+    substitutes,
+    urgencyComparison,
+    outcomeMetrics,
+    warnings,
+  } satisfies ProcurementAssessment;
 }

@@ -66,6 +66,19 @@ export interface ProcurementRequest {
   createdAt: string;
 }
 
+export interface ProcurementRequestDraft {
+  itemId?: string;
+  itemName?: string;
+  category?: Category;
+  quantity: number;
+  requiredBy: string;
+  budgetMin: number;
+  budgetMax: number;
+  priority: Priority;
+  minSupplierRating: number;
+  notes: string;
+}
+
 export interface SupplierQuote {
   supplierId: string;
   supplierName: string;
@@ -105,6 +118,7 @@ export interface ScoreBreakdown {
 }
 
 export interface ScoredSupplierQuote extends SupplierQuote {
+  totalCost: number;
   finalScore: number;
   scoreBreakdown: ScoreBreakdown;
   flags: string[];
@@ -123,6 +137,8 @@ export interface RecommendationBundle {
   balanced: RecommendationResult;
 }
 
+export type RecommendationKey = keyof RecommendationBundle;
+
 export interface RiskInsight {
   key: string;
   label: string;
@@ -140,6 +156,85 @@ export interface SubstituteSuggestion {
   priceDelta: number;
   riskLevel: RiskLevel;
   rationale: string;
+}
+
+export interface OutcomeMetrics {
+  savingsVsMedian: number;
+  leadTimeImprovementDays: number;
+  riskReductionPoints: number;
+}
+
+export interface UrgencyComparison {
+  changed: boolean;
+  message: string;
+}
+
+export interface ProcurementAssessment {
+  generatedAt: string;
+  request: ProcurementRequest;
+  summary: string;
+  scoredQuotes: ScoredSupplierQuote[];
+  recommendations: RecommendationBundle;
+  riskInsights: RiskInsight[];
+  substitutes: SubstituteSuggestion[];
+  urgencyComparison: UrgencyComparison;
+  outcomeMetrics: OutcomeMetrics;
+  warnings: string[];
+}
+
+export interface NegotiationTurn {
+  speaker: "ProcurePilot" | "Supplier Desk";
+  text: string;
+}
+
+export interface NegotiationResult {
+  supplierId: string;
+  supplierName: string;
+  recommendationKey: RecommendationKey;
+  recommendationLabel: string;
+  originalUnitPrice: number;
+  originalTotalCost: number;
+  negotiatedUnitPrice: number;
+  negotiatedTotalCost: number;
+  savings: number;
+  savingsPercent: number;
+  originalLeadTimeDays: number;
+  negotiatedLeadTimeDays: number;
+  sandboxAccount: string;
+  termsWon: string[];
+  summary: string;
+  transcript: NegotiationTurn[];
+}
+
+export type NegotiationSessionStatus = "open" | "closed";
+
+export interface NegotiationRoomMessage {
+  id: string;
+  role: "buyer" | "seller";
+  speaker: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface NegotiationSessionSummary {
+  id: string;
+  requestId: string;
+  supplierId: string;
+  supplierName: string;
+  recommendationKey: RecommendationKey;
+  recommendationLabel: string;
+  status: NegotiationSessionStatus;
+  openedTotal: number;
+  targetTotal: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NegotiationRoom {
+  session: NegotiationSessionSummary;
+  request: ProcurementRequest;
+  recommendation: RecommendationResult;
+  messages: NegotiationRoomMessage[];
 }
 
 export interface SampleRequestTemplate {

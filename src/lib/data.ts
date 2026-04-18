@@ -1,4 +1,5 @@
 import {
+  Category,
   CatalogItem,
   ProcurementRequest,
   SampleRequestTemplate,
@@ -44,6 +45,108 @@ function riskLevelFromScore(score: number) {
 
   return "High";
 }
+
+function normalizeSearchText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeSearchText(value: string) {
+  return normalizeSearchText(value)
+    .split(" ")
+    .filter((token) => token.length > 1);
+}
+
+function buildShortLabel(value: string) {
+  return value
+    .split(/\s+/)
+    .slice(0, 3)
+    .join(" ")
+    .trim()
+    .slice(0, 32);
+}
+
+function inferUnitFromText(value: string, fallback: string) {
+  const normalized = normalizeSearchText(value);
+
+  if (normalized.includes("drum")) {
+    return "drum";
+  }
+
+  if (normalized.includes("pail")) {
+    return "pail";
+  }
+
+  if (normalized.includes("box")) {
+    return "box";
+  }
+
+  if (normalized.includes("glove")) {
+    return "box of 100";
+  }
+
+  if (normalized.includes("filter")) {
+    return "filter";
+  }
+
+  if (normalized.includes("label")) {
+    return "roll case";
+  }
+
+  if (normalized.includes("board") || normalized.includes("module")) {
+    return "module";
+  }
+
+  if (normalized.includes("part") || normalized.includes("kit")) {
+    return "set";
+  }
+
+  return fallback;
+}
+
+const categoryKeywords: Array<{ category: Category; keywords: string[] }> = [
+  {
+    category: "maintenance",
+    keywords: ["lubricant", "filter", "bearing", "seal", "compressor", "pump", "hvac", "motor"],
+  },
+  {
+    category: "office supplies",
+    keywords: ["paper", "stationery", "toner", "printer", "copier", "folder", "pen"],
+  },
+  {
+    category: "packaging",
+    keywords: ["carton", "box", "mailer", "label", "packaging", "wrap", "pallet", "tape"],
+  },
+  {
+    category: "chemicals",
+    keywords: ["chemical", "cleaner", "solvent", "degreaser", "acid", "caustic", "alkaline"],
+  },
+  {
+    category: "spare parts",
+    keywords: ["spare", "injector", "gear", "valve", "belt", "coupling", "bearing kit", "gasket"],
+  },
+  {
+    category: "electronics",
+    keywords: ["sensor", "pcb", "controller", "board", "stm32", "module", "relay", "electronics"],
+  },
+  {
+    category: "safety equipment",
+    keywords: ["glove", "ppe", "helmet", "goggle", "mask", "vest", "respirator", "safety"],
+  },
+];
+
+const categoryBenchmarks: Record<Category, string> = {
+  maintenance: "industrial-lubricant-a",
+  "office supplies": "copier-paper",
+  packaging: "corrugated-cartons",
+  chemicals: "caustic-cleaner",
+  "spare parts": "generator-injector-kit",
+  electronics: "stm32-control-board",
+  "safety equipment": "nitrile-safety-gloves",
+};
 
 export const defaultWeights: Weights = {
   price: 24,
@@ -876,13 +979,93 @@ export function getSupplierById(supplierId: string) {
   return supplierProfiles.find((supplier) => supplier.id === supplierId);
 }
 
-export function buildQuotesForItem(itemId: string): SupplierQuote[] {
-  const item = getItemById(itemId);
-
-  if (!item) {
-    return [];
+export function inferCategoryFromText(
+  itemName: string,
+  explicitCategory?: Category,
+  notes?: string,
+): Category {
+  if (explicitCategory) {
+    return explicitCategory;
   }
 
+  const haystack = normalizeSearchText(`${itemName} ${notes ?? ""}`);
+  const scoredCategories = categoryKeywords.map((entry) => ({
+    category: entry.category,
+    score: entry.keywords.reduce(
+      (sum, keyword) => sum + (haystack.includes(keyword) ? 1 : 0),
+      0,
+    ),
+  }));
+  const best = scoredCategories.sort((left, right) => right.score - left.score)[0];
+
+  return best && best.score > 0 ? best.category : "maintenance";
+}
+
+export function getCategoryBenchmarkItem(category: Category) {
+  return getItemById(categoryBenchmarks[category]);
+}
+
+function findClosestCatalogItem(query: string, preferredCategory?: Category) {
+  const normalizedQuery = normalizeSearchText(query);
+  const tokens = tokenizeSearchText(query);
+
+  const matches = catalogItems
+    .map((item) => {
+      const haystack = normalizeSearchText(
+        [item.id, item.name, item.shortLabel, item.category, item.description, item.technicalSpecs].join(" "),
+      );
+
+      let score = 0;
+
+      if (haystack.includes(normalizedQuery)) {
+        score += 30;
+      }
+
+      if (preferredCategory && item.category === preferredCategory) {
+        score += 12;
+      }
+
+      for (const token of tokens) {
+        if (haystack.includes(token)) {
+          score += 5;
+        }
+      }
+
+      return { item, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score);
+
+  return matches[0]?.item;
+}
+
+function getSupplierFitScore(supplier: SupplierProfile, query: string) {
+  const tokens = tokenizeSearchText(query);
+  const specialtyScore =
+    supplier.specialtyItems?.reduce((sum, specialtyItemId) => {
+      const specialtyItem = getItemById(specialtyItemId);
+
+      if (!specialtyItem) {
+        return sum;
+      }
+
+      const haystack = normalizeSearchText(
+        `${specialtyItem.id} ${specialtyItem.name} ${specialtyItem.shortLabel}`,
+      );
+
+      return (
+        sum +
+        tokens.reduce(
+          (tokenSum, token) => tokenSum + (haystack.includes(token) ? 8 : 0),
+          0,
+        )
+      );
+    }, 0) ?? 0;
+
+  return specialtyScore + supplier.baseReliability - supplier.riskIndex * 18;
+}
+
+function buildQuotesFromCatalogItem(item: CatalogItem): SupplierQuote[] {
   return item.supplierIds
     .map((supplierId) => {
       const supplier = getSupplierById(supplierId);
@@ -957,7 +1140,10 @@ export function buildQuotesForItem(itemId: string): SupplierQuote[] {
 
       const deliveryConfidence = clamp(
         Math.round(
-          supplier.deliveryConfidence - riskScore * 0.1 + (1 - leadNoise) * 6 + specialtyBoost * 3,
+          supplier.deliveryConfidence -
+            riskScore * 0.1 +
+            (1 - leadNoise) * 6 +
+            specialtyBoost * 3,
         ),
         55,
         97,
@@ -982,6 +1168,80 @@ export function buildQuotesForItem(itemId: string): SupplierQuote[] {
       };
     })
     .filter((quote): quote is SupplierQuote => quote !== null);
+}
+
+export function resolveItemProfileForRequest(request: ProcurementRequest): CatalogItem {
+  const directItem = getItemById(request.itemId);
+
+  if (directItem) {
+    return directItem;
+  }
+
+  const inferredCategory = inferCategoryFromText(request.itemName, request.category, request.notes);
+  const benchmarkItem =
+    findClosestCatalogItem(`${request.itemName} ${request.notes}`, inferredCategory) ??
+    getCategoryBenchmarkItem(inferredCategory);
+
+  if (!benchmarkItem) {
+    throw new Error(`Unable to resolve an item profile for "${request.itemName}".`);
+  }
+
+  const estimatedUnitPrice =
+    request.quantity > 0
+      ? Math.max(
+          1,
+          Math.round(((request.budgetMin + request.budgetMax) / 2) / Math.max(request.quantity, 1)),
+        )
+      : benchmarkItem.basePrice;
+  const supplierIds = supplierProfiles
+    .filter((supplier) => supplier.supportedCategories.includes(inferredCategory))
+    .sort(
+      (left, right) =>
+        getSupplierFitScore(right, request.itemName) - getSupplierFitScore(left, request.itemName),
+    )
+    .map((supplier) => supplier.id);
+  const substituteIds = Array.from(
+    new Set(
+      [benchmarkItem.id, ...benchmarkItem.substituteIds]
+        .filter((itemId) => itemId !== request.itemId)
+        .slice(0, 3),
+    ),
+  );
+
+  return {
+    id: request.itemId,
+    name: request.itemName,
+    shortLabel: buildShortLabel(request.itemName),
+    category: inferredCategory,
+    unit: inferUnitFromText(request.itemName, benchmarkItem.unit),
+    description: request.notes || `Ad hoc sourcing request for ${request.itemName}.`,
+    technicalSpecs: request.notes || benchmarkItem.technicalSpecs,
+    basePrice: clamp(
+      estimatedUnitPrice,
+      1,
+      Math.max(benchmarkItem.basePrice * 6, estimatedUnitPrice * 2, 5000),
+    ),
+    baseLeadTime: benchmarkItem.baseLeadTime,
+    defaultQuantity: request.quantity,
+    baseMoq: benchmarkItem.baseMoq,
+    supplierIds,
+    substituteIds,
+    crisisProfile: benchmarkItem.crisisProfile,
+  };
+}
+
+export function buildQuotesForItem(itemId: string): SupplierQuote[] {
+  const item = getItemById(itemId);
+
+  if (!item) {
+    return [];
+  }
+
+  return buildQuotesFromCatalogItem(item);
+}
+
+export function buildQuotesForRequest(request: ProcurementRequest): SupplierQuote[] {
+  return buildQuotesFromCatalogItem(resolveItemProfileForRequest(request));
 }
 
 export function buildSeedRequests(): ProcurementRequest[] {

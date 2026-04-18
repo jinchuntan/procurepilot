@@ -2,13 +2,21 @@
 
 import { startTransition, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, CheckCircle2, ClipboardCheck, FlaskConical, Sparkles } from "lucide-react";
+import { ArrowRight, ClipboardCheck, Sparkles } from "lucide-react";
 import { catalogItems, sampleRequestTemplates } from "@/lib/data";
 import { formatCurrency } from "@/lib/format";
-import { saveRequests, loadRequests } from "@/lib/storage";
-import { Priority } from "@/lib/types";
+import { Category, Priority } from "@/lib/types";
 
 const priorityOptions: Priority[] = ["Low", "Medium", "High", "Critical"];
+const categoryOptions: Category[] = [
+  "maintenance",
+  "office supplies",
+  "packaging",
+  "chemicals",
+  "spare parts",
+  "electronics",
+  "safety equipment",
+];
 
 function todayDate() {
   return new Date().toISOString().slice(0, 10);
@@ -22,33 +30,54 @@ function futureDate(daysFromNow: number) {
 
 export function RequestForm() {
   const router = useRouter();
-  const [selectedItemId, setSelectedItemId] = useState(sampleRequestTemplates[0]?.itemId ?? catalogItems[0]?.id ?? "");
+  const [selectedItemId, setSelectedItemId] = useState(
+    sampleRequestTemplates[0]?.itemId ?? catalogItems[0]?.id ?? "",
+  );
+  const [itemName, setItemName] = useState(
+    catalogItems.find((item) => item.id === (sampleRequestTemplates[0]?.itemId ?? ""))?.name ??
+      catalogItems[0]?.name ??
+      "",
+  );
+  const [category, setCategory] = useState<Category>(
+    catalogItems.find((item) => item.id === (sampleRequestTemplates[0]?.itemId ?? ""))?.category ??
+      catalogItems[0]?.category ??
+      "maintenance",
+  );
   const [quantity, setQuantity] = useState(sampleRequestTemplates[0]?.quantity ?? 1);
-  const [requiredBy, setRequiredBy] = useState(futureDate(sampleRequestTemplates[0]?.requiredInDays ?? 7));
+  const [requiredBy, setRequiredBy] = useState(
+    futureDate(sampleRequestTemplates[0]?.requiredInDays ?? 7),
+  );
   const [budgetMin, setBudgetMin] = useState(sampleRequestTemplates[0]?.budgetMin ?? 1000);
   const [budgetMax, setBudgetMax] = useState(sampleRequestTemplates[0]?.budgetMax ?? 2000);
-  const [priority, setPriority] = useState<Priority>(sampleRequestTemplates[0]?.priority ?? "High");
+  const [priority, setPriority] = useState<Priority>(
+    sampleRequestTemplates[0]?.priority ?? "High",
+  );
   const [minSupplierRating, setMinSupplierRating] = useState(
     sampleRequestTemplates[0]?.minSupplierRating ?? 80,
   );
   const [notes, setNotes] = useState(sampleRequestTemplates[0]?.notes ?? "");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const selectedItem = useMemo(
     () => catalogItems.find((item) => item.id === selectedItemId) ?? catalogItems[0],
     [selectedItemId],
   );
 
-  const budgetSpan = Math.max(budgetMax - budgetMin, 0);
-
   function applyTemplate(templateId: string) {
     const template = sampleRequestTemplates.find((entry) => entry.id === templateId);
-    const item = catalogItems.find((entry) => entry.id === template?.itemId);
 
-    if (!template || !item) {
+    if (!template) {
       return;
     }
 
-    setSelectedItemId(item.id);
+    setSelectedItemId(template.itemId);
+    setItemName(
+      catalogItems.find((item) => item.id === template.itemId)?.name ?? template.label,
+    );
+    setCategory(
+      catalogItems.find((item) => item.id === template.itemId)?.category ?? "maintenance",
+    );
     setQuantity(template.quantity);
     setRequiredBy(futureDate(template.requiredInDays));
     setBudgetMin(template.budgetMin);
@@ -58,62 +87,74 @@ export function RequestForm() {
     setNotes(template.notes);
   }
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!selectedItem) {
-      return;
+    try {
+      setPending(true);
+      setError(null);
+
+      const response = await fetch("/api/requests", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          itemId: selectedItemId || undefined,
+          itemName,
+          category,
+          quantity,
+          requiredBy,
+          budgetMin,
+          budgetMax,
+          priority,
+          minSupplierRating,
+          notes,
+        }),
+      });
+
+      const data = (await response.json()) as { request?: { id: string }; error?: string };
+
+      if (!response.ok || !data.request) {
+        throw new Error(data.error ?? "Failed to create request.");
+      }
+
+      startTransition(() => {
+        router.push(`/?request=${data.request?.id}`);
+      });
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error ? submitError.message : "Failed to create request.",
+      );
+    } finally {
+      setPending(false);
     }
-
-    const requests = loadRequests();
-    const requestId = `req-${Date.now()}`;
-    const nextRequests = [
-      {
-        id: requestId,
-        itemId: selectedItem.id,
-        itemName: selectedItem.name,
-        category: selectedItem.category,
-        quantity,
-        requiredBy,
-        budgetMin,
-        budgetMax,
-        priority,
-        minSupplierRating,
-        notes,
-        createdAt: todayDate(),
-      },
-      ...requests,
-    ];
-
-    saveRequests(nextRequests);
-    startTransition(() => {
-      router.push(`/?request=${requestId}`);
-    });
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.4fr_0.8fr]">
+    <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
       <form
         onSubmit={handleSubmit}
-        className="rounded-[28px] border border-slate-200/80 bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] sm:p-8"
+        className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_40px_rgba(15,23,42,0.06)] sm:p-8"
       >
-        <div className="flex flex-col gap-4 border-b border-slate-200 pb-6">
-          <div className="flex items-center gap-3">
+        <div className="border-b border-slate-200 pb-6">
+          <div className="flex items-start gap-3">
             <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-50 text-teal-700">
               <ClipboardCheck className="h-5 w-5" />
             </span>
             <div>
-              <p className="text-sm font-semibold text-slate-500">New Procurement Request</p>
+              <p className="text-sm font-semibold text-slate-500">Simple request intake</p>
               <h2 className="font-[family-name:var(--font-display)] text-2xl text-slate-950">
-                Capture the sourcing brief in one pass
+                Create a sourcing brief in one pass
               </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                The website stays simple: you submit one request, and the Lua agent handles the
+                supplier ranking, risk scan, and recommendation.
+              </p>
             </div>
           </div>
-          <p className="max-w-2xl text-sm leading-6 text-slate-600">
-            ProcurePilot uses this request to shortlist suppliers, score urgency fit, surface substitutes,
-            and explain the recommendation in business language.
-          </p>
-          <div className="flex flex-wrap gap-2">
+
+          <div className="mt-5 flex flex-wrap gap-2">
             {sampleRequestTemplates.map((template) => (
               <button
                 key={template.id}
@@ -130,27 +171,33 @@ export function RequestForm() {
 
         <div className="mt-6 grid gap-5 md:grid-cols-2">
           <label className="space-y-2">
-            <span className="text-sm font-semibold text-slate-700">Item name</span>
-            <select
-              value={selectedItemId}
-              onChange={(event) => setSelectedItemId(event.target.value)}
+            <span className="text-sm font-semibold text-slate-700">Item</span>
+            <input
+              value={itemName}
+              onChange={(event) => {
+                setItemName(event.target.value);
+                const matchingItem = catalogItems.find((item) => item.name === event.target.value);
+                setSelectedItemId(matchingItem?.id ?? "");
+                setCategory(matchingItem?.category ?? category);
+              }}
+              placeholder="Example: RFID labels, hydraulic seal kit, or industrial lubricant"
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-teal-400 focus:bg-white"
-            >
-              {catalogItems.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+            />
           </label>
 
           <label className="space-y-2">
             <span className="text-sm font-semibold text-slate-700">Category</span>
-            <input
-              value={selectedItem?.category ?? ""}
-              readOnly
-              className="w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm capitalize text-slate-700"
-            />
+            <select
+              value={category}
+              onChange={(event) => setCategory(event.target.value as Category)}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm capitalize text-slate-900 outline-none transition focus:border-teal-400 focus:bg-white"
+            >
+              {categoryOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label className="space-y-2">
@@ -165,7 +212,7 @@ export function RequestForm() {
           </label>
 
           <label className="space-y-2">
-            <span className="text-sm font-semibold text-slate-700">Required by date</span>
+            <span className="text-sm font-semibold text-slate-700">Required by</span>
             <input
               type="date"
               min={todayDate()}
@@ -198,7 +245,7 @@ export function RequestForm() {
           </label>
 
           <label className="space-y-2">
-            <span className="text-sm font-semibold text-slate-700">Priority / urgency</span>
+            <span className="text-sm font-semibold text-slate-700">Priority</span>
             <select
               value={priority}
               onChange={(event) => setPriority(event.target.value as Priority)}
@@ -235,71 +282,61 @@ export function RequestForm() {
           />
         </label>
 
+        {error ? (
+          <div className="mt-5 rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {error}
+          </div>
+        ) : null}
+
         <div className="mt-6 flex flex-col gap-4 rounded-[24px] border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="space-y-1">
+          <div>
             <p className="text-sm font-semibold text-slate-900">
-              Budget window: {formatCurrency(budgetMin)} to {formatCurrency(budgetMax)}
+              Budget range: {formatCurrency(budgetMin)} to {formatCurrency(budgetMax)}
             </p>
-            <p className="text-sm text-slate-600">
-              Flexibility band of {formatCurrency(budgetSpan)} gives the engine room to trade cost against
-              speed and risk.
+            <p className="mt-1 text-sm text-slate-600">
+              The Lua agent will use this range as a hard buying constraint.
             </p>
           </div>
           <button
             type="submit"
-            className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+            disabled={pending}
+            className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
           >
-            Run supplier comparison
+            {pending ? "Creating..." : "Create request"}
             <ArrowRight className="h-4 w-4" />
           </button>
         </div>
       </form>
 
-      <div className="space-y-6">
-        <section className="rounded-[28px] border border-slate-200/80 bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-          <div className="flex items-center gap-3">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-50 text-amber-700">
-              <FlaskConical className="h-5 w-5" />
-            </span>
-            <div>
-              <p className="text-sm font-semibold text-slate-500">Selected SKU</p>
-              <h3 className="font-[family-name:var(--font-display)] text-xl text-slate-950">
-                {selectedItem?.name}
-              </h3>
-            </div>
-          </div>
-          <p className="mt-4 text-sm leading-6 text-slate-600">{selectedItem?.description}</p>
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs font-semibold tracking-[0.18em] text-slate-500 uppercase">Specs</p>
-            <p className="mt-2 text-sm leading-6 text-slate-700">{selectedItem?.technicalSpecs}</p>
-          </div>
-        </section>
+      <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_40px_rgba(15,23,42,0.06)]">
+        <p className="text-sm font-semibold text-slate-500">Selected item</p>
+        <h3 className="mt-2 font-[family-name:var(--font-display)] text-2xl text-slate-950">
+          {itemName}
+        </h3>
+        <p className="mt-4 text-sm leading-6 text-slate-600">
+          {selectedItemId
+            ? selectedItem?.description
+            : "Custom freeform request. ProcurePilot will benchmark this item against the closest supported sourcing category during assessment."}
+        </p>
 
-        <section className="rounded-[28px] border border-slate-200/80 bg-white p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-          <div className="flex items-center gap-3">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
-              <CheckCircle2 className="h-5 w-5" />
-            </span>
-            <div>
-              <p className="text-sm font-semibold text-slate-500">What ProcurePilot will generate</p>
-              <h3 className="font-[family-name:var(--font-display)] text-xl text-slate-950">
-                Instant sourcing output
-              </h3>
-            </div>
-          </div>
-          <ul className="mt-4 space-y-3 text-sm text-slate-700">
-            <li className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              Supplier comparison table across price, lead time, stock, risk, MOQ, and delivery confidence
-            </li>
-            <li className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              Ranked recommendations for best overall, fastest, low-cost, and balanced sourcing choices
-            </li>
-            <li className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              Substitute options and crisis insights if the shortlist looks risky or slow
-            </li>
+        <div className="mt-5 rounded-[22px] border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Specs</p>
+          <p className="mt-2 text-sm leading-6 text-slate-700">
+            {selectedItemId
+              ? selectedItem?.technicalSpecs
+              : "Use the notes field to provide technical requirements, acceptable equivalents, or supplier constraints for this custom item."}
+          </p>
+        </div>
+
+        <div className="mt-5 rounded-[22px] border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">What happens next</p>
+          <ul className="mt-3 space-y-3 text-sm leading-6 text-slate-700">
+            <li>The request is saved to a real SQLite-backed app database.</li>
+            <li>The Lua agent validates the request and ranks suppliers server-side.</li>
+            <li>The dashboard refreshes with the recommendation, risk insights, and substitute options.</li>
           </ul>
-        </section>
-      </div>
+        </div>
+      </section>
     </div>
   );
 }

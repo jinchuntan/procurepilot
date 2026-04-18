@@ -1,0 +1,15 @@
+agent:
+  agentId: baseAgent_agent_1776482164161_hfkexoah0
+  orgId: a7d87fb0-420b-44fd-bac0-c050b7b37d9b
+skills:
+  - name: procurement-ops-skill
+    skillId: 5dad13ff-03df-48e5-bb4c-8aebc7d707d7
+    version: 1.0.3
+webhooks: []
+jobs: []
+preprocessors: []
+postprocessors: []
+mcpServers: []
+backup:
+  lastHash: 97fd0b57b217fa2596e0647fe3bc77a8958e146c308ee15ab1cdb12c5efb8285
+  lastPushedAt: '2026-04-18T03:52:12.312Z'

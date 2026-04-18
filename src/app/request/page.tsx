@@ -5,8 +5,8 @@ export default function RequestPage() {
   return (
     <SiteShell
       eyebrow="New Request"
-      title="Capture an urgent procurement need and let ProcurePilot build the sourcing shortlist."
-      subtitle="This form is designed for demo speed: preload realistic examples, tweak business constraints, and jump straight into ranked supplier recommendations."
+      title="Capture one procurement need and let the Lua agent take over from there."
+      subtitle="The interface stays simple on purpose: one request form in, one clear recommendation workflow out."
     >
       <RequestForm />
     </SiteShell>

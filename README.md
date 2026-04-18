@@ -22,11 +22,14 @@ ProcurePilot turns an urgent procurement brief into a live sourcing workspace:
 - flags risky suppliers and timing issues
 - suggests substitute items when the shortlist is weak
 - explains the recommendation in plain business language
-- generates an RFQ-ready summary for the next step
+- runs the recommendation through a server-side Lua procurement agent
 
 ## Key Features
 
 - Startup-style landing dashboard with SME procurement metrics
+- Guided agent-led sourcing interview that asks one procurement question at a time
+- Recommendation tiles that the user can click to choose a supplier path
+- Supplier sandbox negotiation flow after a recommendation is selected
 - New request flow with realistic sample scenarios
 - Mock supplier network tailored to Southeast Asia
 - Transparent supplier ranking engine with live weight sliders
@@ -34,8 +37,11 @@ ProcurePilot turns an urgent procurement brief into a live sourcing workspace:
   best overall, lowest cost, fastest delivery, best balanced
 - Substitute finder for constrained or risky items
 - Crisis / risk insights panel with low, medium, high signals
-- RFQ draft copy + export recommendation summary
-- Local-only demo architecture with seeded mock data and no backend dependency
+- Minimal UI with one request form and one recommendation dashboard
+- SQLite-backed request persistence
+- Lua tool-backed server-side assessment flow compiled with `lua-cli`
+- Live Lua chat route for plain-English procurement briefs
+- Lua tool-backed supplier negotiation simulation for demo-ready price improvement
 
 ## Demo Data
 
@@ -74,7 +80,8 @@ Buyers can change the weights live from the dashboard and instantly re-rank the 
 - Next.js 16
 - TypeScript
 - Tailwind CSS
-- Local mock data + localStorage persistence
+- SQLite via `better-sqlite3`
+- Lua Agentic AI tooling via `lua-cli`
 - Lucide React icons
 
 ## Local Setup
@@ -88,11 +95,24 @@ npm run dev
 
 Then open `http://localhost:3000`.
 
+For the live Lua agent chat panel, ProcurePilot uses:
+
+- `LUA_API_KEY` if it is set in your environment
+- otherwise your local Lua CLI credentials file at `~/.lua-cli/credentials`
+
+The project is already initialized against a Lua agent through [`lua.skill.yaml`](./lua.skill.yaml). If you want to rebind it to a different agent, run:
+
+```bash
+lua init --force
+```
+
 Production checks:
 
 ```bash
 npm run lint
 npm run build
+npm run lua:compile
+npx lua push all --ci --force --auto-deploy
 ```
 
 ## Deploying To Vercel
@@ -104,18 +124,26 @@ If you import the whole workspace/repository into Vercel:
 1. Create a new Vercel project.
 2. Set the Root Directory to `procurepilot`.
 3. Keep the detected framework as `Next.js`.
-4. No environment variables are required for this MVP.
+4. No environment variables are required for local seeded usage.
 5. Deploy.
 
 If you upload or connect only the `procurepilot` folder, no extra configuration is needed.
 
-The project also includes a lightweight [`vercel.json`](./vercel.json) and a Node engine declaration in `package.json` to make the deployment target explicit.
+The project also includes a lightweight [`vercel.json`](./vercel.json), a Node engine declaration in `package.json`, and a Lua manifest in [`lua.skill.yaml`](./lua.skill.yaml).
+
+Important note:
+- the web app itself runs locally and the Lua-backed assessment route works now
+- `lua compile` works locally
+- cloud sync for the Lua agent is still skipped until you add your Lua `agentId`, `orgId`, and API credentials
 
 ## Project Structure
 
 ```text
 src/
   app/
+    api/
+      agent/assess/route.ts
+      requests/route.ts
     page.tsx
     request/page.tsx
   components/
@@ -125,18 +153,30 @@ src/
   lib/
     data.ts
     format.ts
+    procurement-schemas.ts
     scoring.ts
-    storage.ts
+    server/
+      database.ts
+      request-repository.ts
     types.ts
+    lua/
+      runtime.ts
+  skills/
+    procurement-ops.skill.ts
+    tools/
+      CompareUrgencyImpactTool.ts
+      RunProcurementAssessmentTool.ts
+      SystemHealthCheckTool.ts
+      ValidateProcurementRequestTool.ts
 ```
 
 ## 30-Second Demo Walkthrough
 
-"ProcurePilot helps SME buyers source urgent items during disruptions. I select a request, instantly compare suppliers across price, lead time, stock, and risk, and get a recommended vendor with a plain-English reason. If the shortlist looks risky, the app suggests substitutes and shows crisis signals. I can also adjust the scoring weights live and export an RFQ-ready summary in seconds."
+"ProcurePilot helps SME buyers source urgent items during disruptions. I open one request, the server-side Lua agent ranks suppliers across price, lead time, stock, and risk, and I get a recommended vendor with a plain-English reason. If the shortlist looks risky, the app surfaces substitutes and crisis signals. I can also adjust the scoring weights live without leaving the page."
 
 ## 1-Minute Pitch For Judges
 
-"ProcurePilot is a crisis-aware procurement copilot built for SMEs that cannot afford slow sourcing decisions during supply shocks. When an urgent item is needed, the app pulls together supplier options, ranks them transparently, flags delivery and risk issues, and recommends the best vendor in business language that a buyer or operations manager can trust. Instead of juggling spreadsheets, emails, and gut feel, teams get a clear, explainable decision in one place. The MVP is designed for real demo value: realistic Southeast Asia supplier data, live scoring controls, substitute recommendations, and an exportable RFQ summary, all without heavy backend setup."
+"ProcurePilot is a crisis-aware procurement copilot built for SMEs that cannot afford slow sourcing decisions during supply shocks. When an urgent item is needed, the app saves the request into a real backend, runs a Lua-based procurement agent server-side, ranks suppliers transparently, flags delivery and risk issues, and recommends the best vendor in business language that a buyer or operations manager can trust. Instead of juggling spreadsheets, emails, and gut feel, teams get a clear, explainable decision in one place with a minimal interface that is easy to use under pressure."
 
 ## 3 Value Propositions For SME Customers
 
