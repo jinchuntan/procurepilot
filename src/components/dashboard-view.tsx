@@ -13,12 +13,12 @@ function Card({
   hint,
 }: Readonly<{ title: string; value: string; hint: string }>) {
   return (
-    <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)]">
-      <p className="text-sm text-slate-500">{title}</p>
-      <p className="mt-3 font-[family-name:var(--font-display)] text-3xl text-slate-950">
+    <div className="rounded-[28px] border border-white/10 bg-black/26 p-5 shadow-[0_18px_40px_rgba(2,6,23,0.26)] backdrop-blur">
+      <p className="text-sm text-white/55">{title}</p>
+      <p className="mt-3 font-[family-name:var(--font-display)] text-3xl text-white">
         {value}
       </p>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{hint}</p>
+      <p className="mt-2 text-sm leading-6 text-white/65">{hint}</p>
     </div>
   );
 }
@@ -55,7 +55,17 @@ export function DashboardView({
   }, [requests]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8 pb-10">
+      <div className="mx-auto max-w-4xl text-center">
+        <p className="text-sm font-medium uppercase tracking-[0.32em] text-teal-200/80">
+          Frontend Mode
+        </p>
+        <h1 className="mt-5 font-[family-name:var(--font-display)] text-4xl tracking-tight text-white sm:text-5xl lg:text-6xl">
+          Having trouble finding the best deal?
+        </h1>
+        <p className="mt-4 text-lg text-white/60">We&apos;ll sort it out for you.</p>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-3">
         <Card
           title="Open requests"
@@ -76,7 +86,9 @@ export function DashboardView({
         />
       </div>
 
-      <AgentConsole initialRequestId={initialRequestId} />
+      <div className="mx-auto w-full max-w-5xl">
+        <AgentConsole initialRequestId={initialRequestId} />
+      </div>
     </div>
   );
 }

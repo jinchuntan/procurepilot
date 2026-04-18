@@ -120,6 +120,62 @@ function getSessionRow(sessionId: string) {
     .get(sessionId) as SessionRow | undefined;
 }
 
+function getLatestSessionRowByRequest(requestId: string, recommendationKey: RecommendationKey) {
+  const db = getDatabase();
+
+  return db
+    .prepare(
+      `
+        SELECT
+          id,
+          request_id,
+          thread_id,
+          supplier_id,
+          supplier_name,
+          recommendation_key,
+          recommendation_label,
+          status,
+          opened_total,
+          target_total,
+          created_at,
+          updated_at
+        FROM negotiation_sessions
+        WHERE request_id = ? AND recommendation_key = ?
+        ORDER BY datetime(updated_at) DESC
+        LIMIT 1
+      `,
+    )
+    .get(requestId, recommendationKey) as SessionRow | undefined;
+}
+
+function getLatestOpenSessionRow() {
+  const db = getDatabase();
+
+  return db
+    .prepare(
+      `
+        SELECT
+          id,
+          request_id,
+          thread_id,
+          supplier_id,
+          supplier_name,
+          recommendation_key,
+          recommendation_label,
+          status,
+          opened_total,
+          target_total,
+          created_at,
+          updated_at
+        FROM negotiation_sessions
+        WHERE status = 'open'
+        ORDER BY datetime(updated_at) DESC
+        LIMIT 1
+      `,
+    )
+    .get() as SessionRow | undefined;
+}
+
 function listMessageRows(sessionId: string) {
   const db = getDatabase();
 
@@ -194,6 +250,29 @@ function updateSession(sessionId: string, status: NegotiationSessionStatus) {
   });
 }
 
+export async function setNegotiationDecision(
+  sessionId: string,
+  decision: Extract<NegotiationSessionStatus, "accepted" | "rejected">,
+) {
+  const session = getSessionRow(sessionId);
+
+  if (!session) {
+    throw new Error(`Negotiation session "${sessionId}" was not found.`);
+  }
+
+  updateSession(sessionId, decision);
+  appendMessage(
+    sessionId,
+    "buyer",
+    "ProcurePilot Buyer",
+    decision === "accepted"
+      ? "The buyer approved the negotiated deal and the order can proceed."
+      : "The buyer declined the negotiated terms, so this sourcing path is now closed.",
+  );
+
+  return getNegotiationRoom(sessionId);
+}
+
 export async function getNegotiationRoom(sessionId: string): Promise<NegotiationRoom> {
   const session = getSessionRow(sessionId);
 
@@ -238,6 +317,12 @@ export async function createNegotiationRoom(
   requestId: string,
   recommendationKey: RecommendationKey,
 ) {
+  const existingSession = getLatestSessionRowByRequest(requestId, recommendationKey);
+
+  if (existingSession && existingSession.status !== "accepted" && existingSession.status !== "rejected") {
+    return getNegotiationRoom(existingSession.id);
+  }
+
   const request = getRequestById(requestId);
 
   if (!request) {
@@ -347,6 +432,19 @@ export async function replyToNegotiationRoom(sessionId: string, sellerMessage: s
 
   const requestSummary = `${request.quantity} units of ${request.itemName}, required by ${request.requiredBy}, budget ceiling USD ${request.budgetMax}, minimum supplier rating ${request.minSupplierRating}, priority ${request.priority}.`;
   const accepted = sellerAcceptedOffer(trimmedMessage);
+
+  if (accepted) {
+    appendMessage(
+      sessionId,
+      "buyer",
+      "ProcurePilot Buyer",
+      "Thank you. We have aligned on the commercial terms and I’m marking this deal as ready for buyer approval.",
+    );
+    updateSession(sessionId, "closed");
+
+    return getNegotiationRoom(sessionId);
+  }
+
   const buyerReply = await sendLiveLuaAgentMessage(
     buildReplyPrompt(
       requestSummary,
@@ -354,11 +452,11 @@ export async function replyToNegotiationRoom(sessionId: string, sellerMessage: s
       session.opened_total,
       session.target_total,
       trimmedMessage,
-      accepted,
+      false,
     ),
     session.thread_id,
   );
-  const closed = accepted || /\[DEAL_CLOSED\]/i.test(buyerReply.reply);
+  const closed = /\[DEAL_CLOSED\]/i.test(buyerReply.reply);
 
   appendMessage(
     sessionId,
@@ -369,4 +467,14 @@ export async function replyToNegotiationRoom(sessionId: string, sellerMessage: s
   updateSession(sessionId, closed ? "closed" : "open");
 
   return getNegotiationRoom(sessionId);
+}
+
+export async function replyToLatestOpenNegotiationRoom(sellerMessage: string) {
+  const session = getLatestOpenSessionRow();
+
+  if (!session) {
+    throw new Error("No open negotiation session is waiting for a seller reply.");
+  }
+
+  return replyToNegotiationRoom(session.id, sellerMessage);
 }

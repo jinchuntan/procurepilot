@@ -1,10 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 import {
   Bot,
-  ExternalLink,
   LoaderCircle,
   MessageSquare,
   RotateCcw,
@@ -14,6 +12,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { defaultWeights } from "@/lib/data";
+import { buildLiveSellerLinks } from "@/lib/live-seller-links";
 import {
   formatCurrency,
   formatDate,
@@ -21,6 +20,7 @@ import {
   formatPercent,
 } from "@/lib/format";
 import {
+  EmailNegotiationStatus,
   Priority,
   ProcurementAssessment,
   RecommendationKey,
@@ -160,7 +160,7 @@ function buildRecommendationPrompt(assessment: ProcurementAssessment) {
     "You are ProcurePilot, continuing the buyer conversation after the shortlist has been prepared.",
     `Request: ${assessment.request.quantity} units of ${assessment.request.itemName}, required by ${assessment.request.requiredBy}, budget ceiling USD ${assessment.request.budgetMax}.`,
     `Top options: ${options}.`,
-    "Explain briefly that the recommendation tiles are ready below and ask the buyer to choose one if they want you to open a live negotiation room.",
+    "Explain briefly that the recommendation tiles are ready below and ask the buyer to choose one if they want you to start the email negotiation.",
     "Respond in no more than two short sentences.",
   ].join(" ");
 }
@@ -169,6 +169,58 @@ function futureDate(daysFromNow: number) {
   const date = new Date();
   date.setDate(date.getDate() + daysFromNow);
   return date.toISOString().slice(0, 10);
+}
+
+function getSuggestedReplies(step: InterviewStep, draft: InterviewDraft) {
+  if (step === "recommendations") {
+    return [];
+  }
+
+  if (step === "item") {
+    return [
+      "Industrial lubricant for compressors",
+      "RFID shipping label rolls",
+      "Diesel generator injector kit",
+      "Safety gloves for warehouse staff",
+    ];
+  }
+
+  if (step === "quantity") {
+    const normalizedItem = draft.itemName.toLowerCase();
+
+    if (/(glove|mask|ppe|helmet)/.test(normalizedItem)) {
+      return ["200 units", "500 units", "1000 units"];
+    }
+
+    if (/(label|carton|packaging|paper|box)/.test(normalizedItem)) {
+      return ["24 units", "50 units", "120 units"];
+    }
+
+    return ["10 units", "25 units", "50 units"];
+  }
+
+  if (step === "requiredBy") {
+    return ["Tomorrow", futureDate(3), "Next week"];
+  }
+
+  if (step === "budget") {
+    return ["Budget cap 5,000", "3,000 to 4,500", "Under 10,000"];
+  }
+
+  if (step === "priority") {
+    return ["Critical", "High", "Medium"];
+  }
+
+  if (step === "rating") {
+    return ["80", "85", "90"];
+  }
+
+  return [
+    "Equivalent substitute is acceptable",
+    "Keep this with one supplier if possible",
+    "Need delivery before our maintenance shutdown",
+    "skip",
+  ];
 }
 
 function parseQuantity(value: string) {
@@ -409,6 +461,8 @@ export function AgentConsole({
 }: Readonly<{
   initialRequestId?: string;
 }>) {
+  const sellerContactEmail =
+    process.env.NEXT_PUBLIC_NEGOTIATION_RECIPIENT_EMAIL ?? "chunchun266@gmail.com";
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [step, setStep] = useState<InterviewStep>("item");
@@ -424,7 +478,7 @@ export function AgentConsole({
   const [error, setError] = useState<string | null>(null);
   const [selectedRecommendationKey, setSelectedRecommendationKey] =
     useState<RecommendationKey | null>(null);
-  const [negotiationRoomHref, setNegotiationRoomHref] = useState<string | null>(null);
+  const [emailNegotiation, setEmailNegotiation] = useState<EmailNegotiationStatus | null>(null);
   const [showAnalysis, setShowAnalysis] = useState(false);
   const reweightReadyRef = useRef(false);
   const initializedRef = useRef(false);
@@ -467,7 +521,7 @@ export function AgentConsole({
     setAssessment(null);
     setError(null);
     setSelectedRecommendationKey(null);
-    setNegotiationRoomHref(null);
+    setEmailNegotiation(null);
     setShowAnalysis(false);
     setWeights(defaultWeights);
     reweightReadyRef.current = false;
@@ -503,7 +557,7 @@ export function AgentConsole({
       setMessages([
         {
           role: "assistant",
-          text: `I loaded your saved brief for ${data.request.itemName}. The recommendation tiles and comparison are ready below, and I can open a live negotiation room once you pick one option.`,
+          text: `I loaded your saved brief for ${data.request.itemName}. The recommendation tiles and comparison are ready below, and I can start the email negotiation once you pick one option.`,
         },
       ]);
       reweightReadyRef.current = false;
@@ -591,12 +645,42 @@ export function AgentConsole({
     return () => controller.abort();
   }, [deferredWeights, requestId]);
 
+  useEffect(() => {
+    if (
+      !emailNegotiation?.sessionId ||
+      emailNegotiation.delivery === "accepted" ||
+      emailNegotiation.delivery === "rejected"
+    ) {
+      return;
+    }
+
+    const intervalId = window.setInterval(async () => {
+      try {
+        const response = await fetch(`/api/agent/email-negotiate/${emailNegotiation.sessionId}`, {
+          cache: "no-store",
+        });
+        const data = (await response.json()) as {
+          negotiation?: EmailNegotiationStatus;
+          error?: string;
+        };
+
+        if (response.ok && data.negotiation) {
+          setEmailNegotiation(data.negotiation);
+        }
+      } catch {
+        // Keep the last visible status if polling fails.
+      }
+    }, 8000);
+
+    return () => window.clearInterval(intervalId);
+  }, [emailNegotiation?.delivery, emailNegotiation?.sessionId]);
+
   async function buildRecommendations(nextDraft: InterviewDraft) {
     try {
       setAssessmentPending(true);
       setError(null);
       setSelectedRecommendationKey(null);
-      setNegotiationRoomHref(null);
+      setEmailNegotiation(null);
 
       setMessages((current) => [
         ...current,
@@ -669,7 +753,7 @@ export function AgentConsole({
           ...current,
           {
             role: "assistant",
-            text: "The recommendation tiles are ready below. Pick one if you want me to open a live negotiation room where you can play the seller and I’ll negotiate as the buyer.",
+            text: "The recommendation tiles are ready below. Pick one if you want me to prepare the email negotiation and keep the website focused on deal status.",
           },
         ]);
       }
@@ -692,12 +776,10 @@ export function AgentConsole({
     }
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submitAnswer(rawAnswer: string) {
+    const answer = rawAnswer.trim();
 
-    const answer = inputValue.trim();
-
-    if (!answer || questionPending || assessmentPending) {
+    if (!answer || questionPending || assessmentPending || step === "recommendations") {
       return;
     }
 
@@ -822,7 +904,12 @@ export function AgentConsole({
     }
   }
 
-  async function handleOpenNegotiationRoom(recommendationKey: RecommendationKey) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await submitAnswer(inputValue);
+  }
+
+  async function handleStartEmailNegotiation(recommendationKey: RecommendationKey) {
     if (!requestId || recommendationPending) {
       return;
     }
@@ -832,7 +919,7 @@ export function AgentConsole({
       setSelectedRecommendationKey(recommendationKey);
       setError(null);
 
-      const response = await fetch("/api/agent/negotiation/session", {
+      const response = await fetch("/api/agent/email-negotiate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -843,37 +930,100 @@ export function AgentConsole({
         }),
       });
       const data = (await response.json()) as {
-        href?: string;
-        room?: { session: { supplierName: string } };
+        negotiation?: EmailNegotiationStatus;
         error?: string;
       };
 
-      if (!response.ok || !data.href) {
-        throw new Error(data.error ?? "Failed to open the negotiation room.");
+      if (!response.ok || !data.negotiation) {
+        throw new Error(data.error ?? "Failed to start email negotiation.");
       }
 
-      setNegotiationRoomHref(data.href);
+      const negotiation = data.negotiation;
+
+      setEmailNegotiation(negotiation);
       setMessages((current) => [
         ...current,
         {
           role: "assistant",
-          text: `The live seller room is ready. Open the link below, play the supplier, and I’ll negotiate there as the buyer until we close the deal.`,
+          text:
+            negotiation.delivery === "waiting_reply"
+              ? `I've started the email negotiation with ${negotiation.recipientEmail}. I'll keep the website focused on deal status while the seller conversation runs off-platform.`
+              : `I prepared the email negotiation for ${negotiation.recipientEmail}. The site will now track deal status here while the draft is ready in Gmail.`,
         },
       ]);
+
+      if (negotiation.composeUrl) {
+        window.open(negotiation.composeUrl, "_blank", "noopener,noreferrer");
+      }
     } catch (roomError) {
-      setError(roomError instanceof Error ? roomError.message : "Failed to open negotiation room.");
+      setError(
+        roomError instanceof Error ? roomError.message : "Failed to start email negotiation.",
+      );
+    } finally {
+      setRecommendationPending(false);
+    }
+  }
+
+  async function handleNegotiationDecision(decision: "accepted" | "rejected") {
+    if (!emailNegotiation?.sessionId || recommendationPending) {
+      return;
+    }
+
+    try {
+      setRecommendationPending(true);
+      const response = await fetch(
+        `/api/agent/email-negotiate/${emailNegotiation.sessionId}/decision`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ decision }),
+        },
+      );
+      const data = (await response.json()) as {
+        negotiation?: EmailNegotiationStatus;
+        error?: string;
+      };
+
+      if (!response.ok || !data.negotiation) {
+        throw new Error(data.error ?? "Failed to update buyer decision.");
+      }
+
+      setEmailNegotiation(data.negotiation);
+      setMessages((current) => [
+        ...current,
+        {
+          role: "assistant",
+          text:
+            decision === "accepted"
+              ? "The buyer approved the negotiated deal. ProcurePilot has marked this sourcing path as awarded."
+              : "The buyer rejected the negotiated deal. ProcurePilot has closed this sourcing path without award.",
+        },
+      ]);
+    } catch (decisionError) {
+      setError(
+        decisionError instanceof Error
+          ? decisionError.message
+          : "Failed to update buyer decision.",
+      );
     } finally {
       setRecommendationPending(false);
     }
   }
 
   const recommendationEntries = assessment ? getRecommendationEntries(assessment) : [];
+  const activeRecommendationKey = selectedRecommendationKey ?? "overall";
+  const liveSellerLinks = assessment
+    ? buildLiveSellerLinks(assessment, activeRecommendationKey)
+    : [];
   const inputPlaceholder =
     step === "notes"
       ? 'Type your notes or "skip"'
       : step === "recommendations"
         ? "Choose a recommendation tile below to continue"
         : "Type your answer here";
+  const suggestedReplies = getSuggestedReplies(step, draft);
 
   return (
     <section className="space-y-6">
@@ -935,23 +1085,46 @@ export function AgentConsole({
             ) : null}
           </div>
 
-          <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3 sm:flex-row">
-            <input
-              value={inputValue}
-              onChange={(event) => setInputValue(event.target.value)}
-              disabled={step === "recommendations" || questionPending || assessmentPending}
-              placeholder={inputPlaceholder}
-              className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-teal-400"
-            />
-            <button
-              type="submit"
-              disabled={step === "recommendations" || questionPending || assessmentPending}
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              Send
-              <Send className="h-4 w-4" />
-            </button>
-          </form>
+          <div className="mt-4 rounded-[28px] border border-slate-200 bg-white p-3 shadow-[0_14px_34px_rgba(15,23,42,0.05)]">
+            {suggestedReplies.length > 0 ? (
+              <div className="flex flex-wrap gap-2 border-b border-slate-100 px-1 pb-3">
+                {suggestedReplies.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => void submitAnswer(suggestion)}
+                    disabled={questionPending || assessmentPending}
+                    className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 transition hover:border-teal-200 hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="flex-1">
+                <p className="px-1 text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                  Tap a quick reply or type your own
+                </p>
+                <input
+                  value={inputValue}
+                  onChange={(event) => setInputValue(event.target.value)}
+                  disabled={step === "recommendations" || questionPending || assessmentPending}
+                  placeholder={inputPlaceholder}
+                  className="mt-2 w-full rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-teal-400 focus:bg-white"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={step === "recommendations" || questionPending || assessmentPending}
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                Send
+                <Send className="h-4 w-4" />
+              </button>
+            </form>
+          </div>
 
           {error ? (
             <div className="mt-4 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -1029,7 +1202,7 @@ export function AgentConsole({
                   <button
                     key={key}
                     type="button"
-                    onClick={() => void handleOpenNegotiationRoom(key)}
+                    onClick={() => void handleStartEmailNegotiation(key)}
                     disabled={recommendationPending}
                     className={`rounded-[28px] border p-5 text-left transition ${
                       selected
@@ -1100,26 +1273,110 @@ export function AgentConsole({
               })}
             </div>
 
-            {negotiationRoomHref ? (
-              <div className="mt-5 rounded-[24px] border border-teal-200 bg-teal-50 p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-teal-900">Live seller room ready</p>
-                    <p className="mt-1 text-sm leading-6 text-teal-800">
-                      Open the negotiation room, play the supplier, and ProcurePilot will continue
-                      as the buyer in that separate conversation.
-                    </p>
-                  </div>
-                  <Link
-                    href={negotiationRoomHref}
-                    className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-                  >
-                    Open negotiation room
-                    <ExternalLink className="h-4 w-4" />
-                  </Link>
+            <div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-semibold text-slate-900">Live seller websites</p>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  These links are generated from the AI recommendation so you can open live seller
+                  and distributor search results instead of relying on fake listings.
+                </p>
+                <div className="mt-4 space-y-3">
+                  {liveSellerLinks.map((link) => (
+                    <a
+                      key={link.label}
+                      href={link.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-[20px] border border-slate-200 bg-white px-4 py-3 transition hover:border-teal-200 hover:bg-teal-50"
+                    >
+                      <p className="text-sm font-semibold text-slate-900">{link.label}</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">{link.description}</p>
+                    </a>
+                  ))}
                 </div>
               </div>
-            ) : null}
+
+              {emailNegotiation ? (
+                <div className="rounded-[24px] border border-teal-200 bg-teal-50 p-4">
+                  <p className="text-sm font-semibold text-teal-900">
+                    {emailNegotiation.headline}
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-teal-800">
+                    {emailNegotiation.detail}
+                  </p>
+                  <div className="mt-4 rounded-[20px] border border-teal-200 bg-white px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Seller inbox
+                    </p>
+                    <p className="mt-1 font-semibold text-slate-950">
+                      {emailNegotiation.recipientEmail}
+                    </p>
+                    <p className="mt-3 text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Buyer inbox
+                    </p>
+                    <p className="mt-1 font-semibold text-slate-950">
+                      {emailNegotiation.senderEmail}
+                    </p>
+                    <p className="mt-3 text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Subject
+                    </p>
+                    <p className="mt-1 font-semibold text-slate-950">
+                      {emailNegotiation.subject}
+                    </p>
+                    <p className="mt-3 text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Latest buyer message
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-slate-700">
+                      {emailNegotiation.latestBuyerMessage}
+                    </p>
+                  </div>
+                  {emailNegotiation.composeUrl ? (
+                    <a
+                      href={emailNegotiation.composeUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-4 inline-flex items-center justify-center rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+                    >
+                      Open Gmail draft
+                    </a>
+                  ) : null}
+                  {emailNegotiation.actionRequired ? (
+                    <p className="mt-4 text-sm leading-6 text-teal-900">
+                      {emailNegotiation.actionRequired}
+                    </p>
+                  ) : null}
+                  {emailNegotiation.delivery === "deal_ready" ? (
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        disabled={recommendationPending}
+                        onClick={() => void handleNegotiationDecision("accepted")}
+                        className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                      >
+                        Accept deal
+                      </button>
+                      <button
+                        type="button"
+                        disabled={recommendationPending}
+                        onClick={() => void handleNegotiationDecision("rejected")}
+                        className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+                      >
+                        Reject deal
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm font-semibold text-slate-900">Email negotiation</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    Pick one recommendation tile and ProcurePilot will prepare the buyer&apos;s email
+                    negotiation against {sellerContactEmail} while this page stays focused on deal
+                    status.
+                  </p>
+                </div>
+              )}
+            </div>
 
             <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
               <button

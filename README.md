@@ -29,7 +29,7 @@ ProcurePilot turns an urgent procurement brief into a live sourcing workspace:
 - Startup-style landing dashboard with SME procurement metrics
 - Guided agent-led sourcing interview that asks one procurement question at a time
 - Recommendation tiles that the user can click to choose a supplier path
-- Supplier sandbox negotiation flow after a recommendation is selected
+- Email negotiation status flow after a recommendation is selected
 - New request flow with realistic sample scenarios
 - Mock supplier network tailored to Southeast Asia
 - Transparent supplier ranking engine with live weight sliders
@@ -41,7 +41,8 @@ ProcurePilot turns an urgent procurement brief into a live sourcing workspace:
 - SQLite-backed request persistence
 - Lua tool-backed server-side assessment flow compiled with `lua-cli`
 - Live Lua chat route for plain-English procurement briefs
-- Lua tool-backed supplier negotiation simulation for demo-ready price improvement
+- Gmail draft handoff for seller email negotiation with hidden deal-state tracking
+- Dynamic live seller search links generated from the AI recommendation
 
 ## Demo Data
 
@@ -99,6 +100,13 @@ For the live Lua agent chat panel, ProcurePilot uses:
 
 - `LUA_API_KEY` if it is set in your environment
 - otherwise your local Lua CLI credentials file at `~/.lua-cli/credentials`
+
+For the current email negotiation flow, ProcurePilot prepares a Gmail compose draft using:
+
+- `NEGOTIATION_SENDER_EMAIL`
+- `NEGOTIATION_RECIPIENT_EMAIL`
+
+The app opens a prefilled Gmail draft for the buyer inbox and keeps the sourcing path on the page.
 
 The project is already initialized against a Lua agent through [`lua.skill.yaml`](./lua.skill.yaml). If you want to rebind it to a different agent, run:
 
