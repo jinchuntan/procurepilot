@@ -1,21 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useDeferredValue, useEffect, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bot,
   ExternalLink,
   LoaderCircle,
-  MessageSquare,
-  RotateCcw,
-  Send,
   ShieldAlert,
   SlidersHorizontal,
   TriangleAlert,
 } from "lucide-react";
+import { LiquidMetalButton } from "@/components/liquid-metal-button";
+import { useLocation } from "@/lib/location-context";
 import { defaultWeights } from "@/lib/data";
 import {
-  formatCurrency,
   formatDate,
   formatDays,
   formatPercent,
@@ -73,6 +70,15 @@ const stepFallbacks: Record<Exclude<InterviewStep, "recommendations">, string> =
   priority: "How urgent is this request: low, medium, high, or critical?",
   rating: "What minimum supplier rating should I keep as the floor?",
   notes: 'Any notes or technical specs I should carry into the recommendation? You can also type "skip".',
+};
+
+const stepOptions: Partial<Record<Exclude<InterviewStep, "recommendations">, string[]>> = {
+  quantity: ["1 unit", "10 units", "100 units"],
+  requiredBy: ["Today", "In 7 days", "In 30 days"],
+  budget: ["Under $5,000", "$5,000 to $20,000", "From $20,000"],
+  priority: ["Low", "High", "Critical"],
+  rating: ["70", "80", "90"],
+  notes: ["skip", "Prioritise fastest delivery", "Eco-friendly suppliers preferred"],
 };
 
 const weightLabels: Array<{ key: keyof Weights; label: string }> = [
@@ -335,8 +341,10 @@ function getRecommendationEntries(assessment: ProcurementAssessment) {
 
 function SupplierComparisonTable({
   assessment,
+  formatCurrency,
 }: Readonly<{
   assessment: ProcurementAssessment;
+  formatCurrency: (value: number) => string;
 }>) {
   return (
     <div className="overflow-x-auto">
@@ -409,6 +417,18 @@ export function AgentConsole({
 }: Readonly<{
   initialRequestId?: string;
 }>) {
+  const location = useLocation();
+  const formatCurrency = useMemo(() => {
+    const currency = location === "Malaysia" ? "MYR" : "SGD";
+    const locale = location === "Malaysia" ? "ms-MY" : "en-SG";
+    const fmt = new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    });
+    return (value: number) => fmt.format(value);
+  }, [location]);
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [step, setStep] = useState<InterviewStep>("item");
@@ -426,8 +446,10 @@ export function AgentConsole({
     useState<RecommendationKey | null>(null);
   const [negotiationRoomHref, setNegotiationRoomHref] = useState<string | null>(null);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [sending, setSending] = useState(false);
   const reweightReadyRef = useRef(false);
   const initializedRef = useRef(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   async function appendAgentQuestion(
     nextStep: Exclude<InterviewStep, "recommendations">,
@@ -591,6 +613,10 @@ export function AgentConsole({
     return () => controller.abort();
   }, [deferredWeights, requestId]);
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, questionPending, assessmentPending]);
+
   async function buildRecommendations(nextDraft: InterviewDraft) {
     try {
       setAssessmentPending(true);
@@ -692,11 +718,7 @@ export function AgentConsole({
     }
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const answer = inputValue.trim();
-
+  async function submitAnswer(answer: string) {
     if (!answer || questionPending || assessmentPending) {
       return;
     }
@@ -704,6 +726,8 @@ export function AgentConsole({
     setMessages((current) => [...current, { role: "user", text: answer }]);
     setInputValue("");
     setError(null);
+    setSending(true);
+    setTimeout(() => setSending(false), 350);
 
     if (step === "item") {
       const nextDraft = { ...draft, itemName: answer };
@@ -819,7 +843,33 @@ export function AgentConsole({
       };
       setDraft(nextDraft);
       await buildRecommendations(nextDraft);
+      return;
     }
+
+    if (step === "recommendations") {
+      try {
+        setQuestionPending(true);
+        const data = await postAgentMessage(answer, threadId);
+        setThreadId(data.threadId);
+        setMessages((current) => [...current, { role: "assistant", text: data.reply }]);
+      } catch {
+        setMessages((current) => [
+          ...current,
+          { role: "assistant", text: "Sorry, I couldn't process that. Please try again." },
+        ]);
+      } finally {
+        setQuestionPending(false);
+      }
+    }
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await submitAnswer(inputValue.trim());
+  }
+
+  function handleOptionClick(option: string) {
+    void submitAnswer(option);
   }
 
   async function handleOpenNegotiationRoom(recommendationKey: RecommendationKey) {
@@ -872,423 +922,319 @@ export function AgentConsole({
     step === "notes"
       ? 'Type your notes or "skip"'
       : step === "recommendations"
-        ? "Choose a recommendation tile below to continue"
+        ? "Ask a follow-up question…"
         : "Type your answer here";
 
+  const userHasReplied = messages.some((m) => m.role === "user");
+  const chatActive = userHasReplied || assessmentPending;
+  const currentStepOptions = step !== "recommendations" ? (stepOptions[step] ?? []) : [];
+  const isUserTurn = !questionPending && !assessmentPending;
+  const showOptions = isUserTurn && currentStepOptions.length > 0;
+  const showStandaloneInput = !chatActive || (isUserTurn && currentStepOptions.length === 0);
+
   return (
-    <section className="space-y-6">
-      <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)] sm:p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex items-start gap-3">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-teal-50 text-teal-700">
-              <Bot className="h-5 w-5" />
-            </span>
-            <div>
-              <h2 className="font-[family-name:var(--font-display)] text-xl text-slate-950">
-                Agent-Led Sourcing Flow
-              </h2>
-              <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                Start with one plain-English procurement need. ProcurePilot will ask the next
-                question, build the shortlist, and only reveal comparison details when they are
-                ready.
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => void bootConversation()}
-            className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-          >
-            <RotateCcw className="h-4 w-4" />
-            Restart flow
-          </button>
-        </div>
-
-        <div className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-            <MessageSquare className="h-4 w-4" />
-            Guided procurement interview
-          </div>
-
-          <div className="mt-4 max-h-[360px] space-y-3 overflow-y-auto pr-1">
-            {messages.map((message, index) => (
-              <div
-                key={`${message.role}-${index}`}
-                className={`max-w-3xl rounded-[22px] px-4 py-3 text-sm leading-6 ${
+    <section className="space-y-2">
+      {/* Chat container — grows in from above the input when user first replies */}
+      <div
+        className={`overflow-hidden rounded-3xl bg-black/40 backdrop-blur-sm transition-all duration-700 ease-in-out ${
+          chatActive
+            ? "max-h-150 translate-y-0 opacity-100"
+            : "max-h-0 -translate-y-2 opacity-0"
+        }`}
+      >
+        {/* Compact scrollable history */}
+        <div className="max-h-47.5 space-y-2.5 overflow-y-auto px-5 pb-3 pt-4 pr-4">
+          {messages.map((message, index) => (
+            <div
+              key={`${message.role}-${index}`}
+              className={message.role === "user" ? "flex justify-end" : ""}
+            >
+              <p
+                className={
                   message.role === "assistant"
-                    ? "border border-slate-200 bg-white text-slate-700"
-                    : "ml-auto bg-slate-950 text-white"
-                }`}
+                    ? "max-w-[90%] text-sm leading-relaxed text-white/80"
+                    : "max-w-[75%] rounded-2xl bg-white/15 px-3.5 py-2 text-sm text-white"
+                }
               >
                 {message.text}
-              </div>
-            ))}
+              </p>
+            </div>
+          ))}
 
-            {questionPending || assessmentPending ? (
-              <div className="inline-flex items-center gap-2 rounded-[22px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-                {assessmentPending
-                  ? "ProcurePilot is building the shortlist..."
-                  : "ProcurePilot is thinking..."}
-              </div>
-            ) : null}
-          </div>
-
-          <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3 sm:flex-row">
-            <input
-              value={inputValue}
-              onChange={(event) => setInputValue(event.target.value)}
-              disabled={step === "recommendations" || questionPending || assessmentPending}
-              placeholder={inputPlaceholder}
-              className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-teal-400"
-            />
-            <button
-              type="submit"
-              disabled={step === "recommendations" || questionPending || assessmentPending}
-              className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              Send
-              <Send className="h-4 w-4" />
-            </button>
-          </form>
-
-          {error ? (
-            <div className="mt-4 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {error}
+          {questionPending || assessmentPending ? (
+            <div className="flex items-center gap-2 text-xs text-white/65">
+              <LoaderCircle className="h-3 w-3 animate-spin" />
+              {assessmentPending ? "Building your shortlist…" : "Thinking…"}
             </div>
           ) : null}
+
+          <div ref={messagesEndRef} />
         </div>
+
+        {/* Multiple-choice options (A / B / C rows + D custom) */}
+        {showOptions ? (
+          <div className="space-y-1.5 border-t border-white/8 px-4 pb-4 pt-3">
+            {currentStepOptions.map((option, i) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => handleOptionClick(option)}
+                className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left transition hover:border-white/25 hover:bg-white/10 active:scale-[0.99]"
+              >
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-white/20 text-xs font-semibold text-white/65">
+                  {String.fromCharCode(65 + i)}
+                </span>
+                <span className="text-sm text-white/75">{option}</span>
+              </button>
+            ))}
+
+            {/* D: custom free-text input */}
+            <form
+              onSubmit={handleSubmit}
+              className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2 transition focus-within:border-white/25 focus-within:bg-white/8"
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-white/20 text-xs font-semibold text-white/65">
+                D
+              </span>
+              <input
+                value={inputValue}
+                onChange={(event) => setInputValue(event.target.value)}
+                disabled={questionPending || assessmentPending}
+                placeholder="Type your own…"
+                className="flex-1 bg-transparent py-1 text-sm text-white outline-none placeholder:text-white/25"
+              />
+              <LiquidMetalButton disabled={questionPending || assessmentPending} sending={sending} />
+            </form>
+          </div>
+        ) : null}
       </div>
 
+      {/* Standalone input — shown on first load or steps with no preset options */}
+      {showStandaloneInput ? (
+        <form
+          onSubmit={handleSubmit}
+          className="flex items-center gap-2 rounded-[22px] border border-white/10 bg-black/50 px-5 py-3 backdrop-blur-sm transition focus-within:border-white/20 focus-within:bg-black/60"
+        >
+          <input
+            value={inputValue}
+            onChange={(event) => setInputValue(event.target.value)}
+            disabled={questionPending || assessmentPending}
+            placeholder={chatActive ? inputPlaceholder : "What are we procuring today?"}
+            className="flex-1 bg-transparent py-1 text-sm text-white outline-none placeholder:text-white/30"
+          />
+          <LiquidMetalButton
+            disabled={questionPending || assessmentPending}
+            sending={sending}
+          />
+        </form>
+      ) : null}
+
+      {error ? (
+        <div className="rounded-[18px] border border-rose-300/40 bg-rose-500/20 px-4 py-3 text-sm text-rose-200 backdrop-blur-sm">
+          {error}
+        </div>
+      ) : null}
+
       {assessment ? (
-        <div className="space-y-6">
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)] sm:p-6">
-            <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
-                <div className="grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Item</p>
-                    <p className="mt-1 font-semibold text-slate-900">{assessment.request.itemName}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Required by</p>
-                    <p className="mt-1 font-semibold text-slate-900">
-                      {formatDate(assessment.request.requiredBy)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Budget</p>
-                    <p className="mt-1 font-semibold text-slate-900">
-                      {formatCurrency(assessment.request.budgetMin)} -{" "}
-                      {formatCurrency(assessment.request.budgetMax)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Priority</p>
-                    <p className="mt-1 font-semibold text-slate-900">{assessment.request.priority}</p>
-                  </div>
-                </div>
+        <div className="space-y-3">
+          {/* 2×2 recommendation tiles */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            {recommendationEntries.map(({ key, entry }) => {
+              const selected = selectedRecommendationKey === key;
+              const isRoomOpen = selected && !!negotiationRoomHref;
 
-                <div className="mt-4 rounded-[20px] border border-slate-200 bg-white p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Notes</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-700">
-                    {assessment.request.notes || "No extra notes were provided."}
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-[24px] bg-slate-950 p-5 text-white">
-                <p className="text-sm text-slate-300">Best overall supplier</p>
-                <h3 className="mt-3 font-[family-name:var(--font-display)] text-2xl">
-                  {assessment.recommendations.overall.supplier.supplierName}
-                </h3>
-                <p className="mt-3 text-sm leading-6 text-slate-200">{assessment.summary}</p>
-                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-2xl bg-white/6 p-3">
-                    <p className="text-slate-300">Total cost</p>
-                    <p className="mt-1 font-semibold text-white">
-                      {formatCurrency(assessment.recommendations.overall.supplier.totalCost)}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl bg-white/6 p-3">
-                    <p className="text-slate-300">Lead time</p>
-                    <p className="mt-1 font-semibold text-white">
-                      {formatDays(assessment.recommendations.overall.supplier.leadTimeDays)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              {recommendationEntries.map(({ key, entry }) => {
-                const selected = selectedRecommendationKey === key;
-
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => void handleOpenNegotiationRoom(key)}
-                    disabled={recommendationPending}
-                    className={`rounded-[28px] border p-5 text-left transition ${
-                      selected
-                        ? "border-slate-950 bg-slate-950 text-white shadow-[0_20px_40px_rgba(15,23,42,0.18)]"
-                        : "border-slate-200 bg-white hover:border-teal-200 hover:bg-teal-50"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="space-y-3">
-                        <p
-                          className={`text-xs font-semibold uppercase tracking-[0.22em] ${
-                            selected ? "text-slate-300" : "text-slate-500"
-                          }`}
-                        >
-                          {entry.label}
-                        </p>
-                        <div className="flex items-center gap-3">
-                          <span
-                            className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-semibold ${
-                              selected ? "bg-white/10 text-white" : "bg-slate-950 text-white"
-                            }`}
-                          >
-                            {supplierMonogram(entry.supplier.supplierName)}
-                          </span>
-                          <div>
-                            <p className="text-xl font-semibold">{entry.supplier.supplierName}</p>
-                            <p
-                              className={`mt-1 text-sm ${
-                                selected ? "text-slate-300" : "text-slate-500"
-                              }`}
-                            >
-                              {entry.supplier.region} | {entry.supplier.country}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div
-                        className={`inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${
-                          selected
-                            ? "border-white/15 bg-white/8 text-white"
-                            : "border-slate-200 bg-slate-50 text-slate-700"
-                        }`}
-                      >
-                        {entry.supplier.finalScore}
-                      </div>
-                    </div>
-
-                    <p
-                      className={`mt-4 text-sm leading-7 ${
-                        selected ? "text-slate-100" : "text-slate-600"
-                      }`}
-                    >
-                      {entry.reason}
-                    </p>
-
-                    <div
-                      className={`mt-4 flex flex-wrap gap-3 text-sm ${
-                        selected ? "text-slate-200" : "text-slate-500"
-                      }`}
-                    >
-                      <span>Total {formatCurrency(entry.supplier.totalCost)}</span>
-                      <span>{formatDays(entry.supplier.leadTimeDays)}</span>
-                      <span>{entry.supplier.riskLevel} risk</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {negotiationRoomHref ? (
-              <div className="mt-5 rounded-[24px] border border-teal-200 bg-teal-50 p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-teal-900">Live seller room ready</p>
-                    <p className="mt-1 text-sm leading-6 text-teal-800">
-                      Open the negotiation room, play the supplier, and ProcurePilot will continue
-                      as the buyer in that separate conversation.
-                    </p>
-                  </div>
-                  <Link
-                    href={negotiationRoomHref}
-                    className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-                  >
-                    Open negotiation room
-                    <ExternalLink className="h-4 w-4" />
-                  </Link>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => setShowAnalysis((current) => !current)}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-              >
-                {showAnalysis ? "Hide comparison details" : "Show comparison details"}
-              </button>
-
-              {assessment.warnings.length > 0 ? (
-                <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
-                  {assessment.warnings.length} risk note{assessment.warnings.length === 1 ? "" : "s"}
-                </span>
-              ) : null}
-            </div>
-          </div>
-
-          {showAnalysis ? (
-            <div className="space-y-6">
-              <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)] sm:p-6">
-                <div className="flex items-start gap-3">
-                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                    <ShieldAlert className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <h3 className="font-[family-name:var(--font-display)] text-xl text-slate-950">
-                      Supplier Comparison
-                    </h3>
-                    <p className="mt-1 text-sm text-slate-600">
-                      Ranked shortlist generated during the conversation flow.
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-5">
-                  <SupplierComparisonTable assessment={assessment} />
-                </div>
-              </div>
-
-              <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-                <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)] sm:p-6">
-                  <div className="flex items-start gap-3">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                      <SlidersHorizontal className="h-5 w-5" />
-                    </span>
+              return (
+                <div
+                  key={key}
+                  className={`flex flex-col rounded-2xl border p-4 backdrop-blur-sm transition ${
+                    selected
+                      ? "border-white/35 bg-white/12"
+                      : "border-white/12 bg-black/35 hover:border-white/20"
+                  }`}
+                >
+                  {/* Header row */}
+                  <div className="flex items-start justify-between gap-2">
                     <div>
-                      <h3 className="font-[family-name:var(--font-display)] text-xl text-slate-950">
-                        Decision Weights
-                      </h3>
-                      <p className="mt-1 text-sm text-slate-600">
-                        Adjust the scoring logic without leaving the conversation flow.
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-white/70">
+                        {entry.label}
                       </p>
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-xs font-bold text-white">
+                          {supplierMonogram(entry.supplier.supplierName)}
+                        </span>
+                        <p className="text-sm font-semibold text-white">
+                          {entry.supplier.supplierName}
+                        </p>
+                      </div>
                     </div>
+                    <span className="shrink-0 rounded-full border border-white/15 bg-white/8 px-2.5 py-0.5 text-xs font-semibold text-white/70">
+                      {entry.supplier.finalScore}
+                    </span>
                   </div>
 
-                  <div className="mt-5 space-y-4">
-                    {weightLabels.map((entry) => (
-                      <label key={entry.key} className="block space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="font-medium text-slate-700">{entry.label}</span>
-                          <span className="font-semibold text-slate-900">{weights[entry.key]}</span>
-                        </div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={40}
-                          value={weights[entry.key]}
-                          onChange={(event) =>
-                            setWeights((current) => ({
-                              ...current,
-                              [entry.key]: Number(event.target.value),
-                            }))
-                          }
-                          className="h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-200 accent-teal-500"
-                        />
-                      </label>
-                    ))}
+                  {/* Key stats */}
+                  <div className="mt-3 flex items-center gap-3 text-xs text-white/55">
+                    <span className="font-medium text-white/80">
+                      {formatCurrency(entry.supplier.totalCost)}
+                    </span>
+                    <span className="text-white/25">·</span>
+                    <span>{formatDays(entry.supplier.leadTimeDays)}</span>
+                    <span className="text-white/25">·</span>
+                    <span
+                      className={
+                        entry.supplier.riskLevel === "High"
+                          ? "text-rose-400"
+                          : entry.supplier.riskLevel === "Medium"
+                            ? "text-amber-400"
+                            : "text-emerald-400"
+                      }
+                    >
+                      {entry.supplier.riskLevel} risk
+                    </span>
+                  </div>
 
+                  {/* Negotiation room link (once opened) */}
+                  {isRoomOpen ? (
+                    <Link
+                      href={negotiationRoomHref!}
+                      className="mt-3 flex items-center gap-1.5 text-xs text-teal-400 hover:text-teal-300"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      Open negotiation room
+                    </Link>
+                  ) : null}
+
+                  {/* Action buttons */}
+                  <div className="mt-auto flex gap-2 pt-3">
                     <button
                       type="button"
-                      onClick={() => setWeights(defaultWeights)}
-                      className="rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                      onClick={() => void handleOpenNegotiationRoom(key)}
+                      disabled={recommendationPending}
+                      className="flex-1 rounded-lg border border-white/15 bg-white/6 py-2 text-xs font-medium text-white/70 transition hover:bg-white/12 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      Reset balanced preset
+                      {selected && recommendationPending ? "Opening…" : "Negotiate"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleOpenNegotiationRoom(key)}
+                      disabled={recommendationPending}
+                      className="flex-1 rounded-lg bg-white/90 py-2 text-xs font-semibold text-slate-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Buy Now
                     </button>
                   </div>
                 </div>
+              );
+            })}
+          </div>
 
-                <div className="space-y-6">
-                  <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)] sm:p-6">
-                    <div className="flex items-start gap-3">
-                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                        <ShieldAlert className="h-5 w-5" />
+          {/* Advanced Analysis toggle */}
+          <button
+            type="button"
+            onClick={() => setShowAnalysis((c) => !c)}
+            className="flex w-full items-center justify-center gap-1.5 py-1 text-xs text-white transition hover:text-white/70"
+          >
+            <span>{showAnalysis ? "Hide" : "Advanced Analysis"}</span>
+            <span className={`transition-transform duration-200 ${showAnalysis ? "rotate-180" : ""}`}>
+              ▾
+            </span>
+            {assessment.warnings.length > 0 && !showAnalysis ? (
+              <span className="ml-1 rounded-full bg-amber-500/30 px-1.5 py-0.5 text-[10px] text-amber-300">
+                {assessment.warnings.length} risk
+              </span>
+            ) : null}
+          </button>
+
+          {/* Advanced Analysis panel */}
+          {showAnalysis ? (
+            <div className="space-y-3 rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm">
+              {/* Supplier comparison table */}
+              <div>
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-white/70">
+                  Supplier Comparison
+                </p>
+                <SupplierComparisonTable assessment={assessment} formatCurrency={formatCurrency} />
+              </div>
+
+              {/* Decision weights */}
+              <div className="border-t border-white/8 pt-3">
+                <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-white/70">
+                  Decision Weights
+                </p>
+                <div className="space-y-2.5">
+                  {weightLabels.map((entry) => (
+                    <label key={entry.key} className="flex items-center gap-3">
+                      <span className="w-20 shrink-0 text-xs text-white/55">{entry.label}</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={40}
+                        value={weights[entry.key]}
+                        onChange={(event) =>
+                          setWeights((current) => ({
+                            ...current,
+                            [entry.key]: Number(event.target.value),
+                          }))
+                        }
+                        className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/15 accent-teal-400"
+                      />
+                      <span className="w-6 text-right text-xs font-semibold text-white/60">
+                        {weights[entry.key]}
                       </span>
-                      <div>
-                        <h3 className="font-[family-name:var(--font-display)] text-xl text-slate-950">
-                          Risk Insights
-                        </h3>
-                        <p className="mt-1 text-sm text-slate-600">
-                          Disruption signals surfaced only after the agent has a real shortlist.
-                        </p>
-                      </div>
-                    </div>
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWeights(defaultWeights)}
+                  className="mt-2 text-xs text-white/50 hover:text-white transition"
+                >
+                  Reset defaults
+                </button>
+              </div>
 
-                    <div className="mt-5 space-y-3">
-                      {assessment.riskInsights.map((insight) => (
-                        <div
-                          key={insight.key}
-                          className="rounded-[22px] border border-slate-200 bg-slate-50 p-4"
+              {/* Risk insights */}
+              {assessment.riskInsights.length > 0 ? (
+                <div className="border-t border-white/8 pt-3">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-white/70">
+                    Risk Insights
+                  </p>
+                  <div className="space-y-2">
+                    {assessment.riskInsights.map((insight) => (
+                      <div key={insight.key} className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-medium text-white">{insight.label}</p>
+                          <p className="mt-0.5 text-xs text-white/70">{insight.description}</p>
+                        </div>
+                        <span
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${riskBadge(insight.severity)}`}
                         >
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="font-semibold text-slate-900">{insight.label}</p>
-                            <span
-                              className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${riskBadge(
-                                insight.severity,
-                              )}`}
-                            >
-                              {insight.severity}
-                            </span>
-                          </div>
-                          <p className="mt-2 text-sm leading-6 text-slate-600">
-                            {insight.description}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)] sm:p-6">
-                    <div className="flex items-start gap-3">
-                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                        <TriangleAlert className="h-5 w-5" />
-                      </span>
-                      <div>
-                        <h3 className="font-[family-name:var(--font-display)] text-xl text-slate-950">
-                          Substitutes
-                        </h3>
-                        <p className="mt-1 text-sm text-slate-600">
-                          Alternatives appear here only when the shortlist looks risky or late.
-                        </p>
+                          {insight.severity}
+                        </span>
                       </div>
-                    </div>
-
-                    <div className="mt-5 space-y-3">
-                      {assessment.substitutes.length ? (
-                        assessment.substitutes.map((substitute) => (
-                          <div
-                            key={substitute.itemId}
-                            className="rounded-[22px] border border-slate-200 bg-slate-50 p-4"
-                          >
-                            <p className="font-semibold text-slate-900">{substitute.itemName}</p>
-                            <p className="mt-1 text-sm text-slate-600">
-                              {substitute.topSupplier} | {substitute.region} |{" "}
-                              {formatDays(substitute.leadTimeDays)}
-                            </p>
-                            <p className="mt-3 text-sm leading-6 text-slate-600">
-                              {substitute.rationale}
-                            </p>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded-[22px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-800">
-                          No substitute escalation is needed for the current shortlist.
-                        </div>
-                      )}
-                    </div>
+                    ))}
                   </div>
                 </div>
-              </div>
+              ) : null}
+
+              {/* Substitutes */}
+              {assessment.substitutes.length > 0 ? (
+                <div className="border-t border-white/8 pt-3">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-white/70">
+                    Substitutes
+                  </p>
+                  <div className="space-y-2">
+                    {assessment.substitutes.map((sub) => (
+                      <div key={sub.itemId} className="text-xs">
+                        <p className="font-medium text-white/75">{sub.itemName}</p>
+                        <p className="text-white/65">
+                          {sub.topSupplier} · {sub.region} · {formatDays(sub.leadTimeDays)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>

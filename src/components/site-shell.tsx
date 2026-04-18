@@ -1,83 +1,102 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Activity, ArrowRight, Radar } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { LocationContext, type Location } from "@/lib/location-context";
 
-function navClass(isActive: boolean) {
-  return isActive
-    ? "bg-white/16 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.12)]"
-    : "text-slate-200/80 hover:bg-white/10 hover:text-white";
-}
+const LOCATIONS: Location[] = ["Malaysia", "Singapore"];
 
 export function SiteShell({
-  eyebrow,
-  title,
-  subtitle,
   children,
+  eyebrow: _eyebrow,
+  title: _title,
+  subtitle: _subtitle,
 }: Readonly<{
-  eyebrow: string;
-  title: string;
-  subtitle: string;
   children: React.ReactNode;
+  eyebrow?: string;
+  title?: string;
+  subtitle?: string;
 }>) {
-  const pathname = usePathname();
+  const vantaRef = useRef<HTMLDivElement>(null);
+  const vantaEffect = useRef<{ destroy: () => void } | null>(null);
+  const [location, setLocation] = useState<Location>("Malaysia");
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    async function initVanta() {
+      if (!vantaRef.current || vantaEffect.current) return;
+      const THREE = await import("three");
+      const { default: FOG } = await import("vanta/dist/vanta.fog.min.js");
+      vantaEffect.current = FOG({
+        el: vantaRef.current,
+        THREE,
+        mouseControls: true,
+        touchControls: true,
+        gyroControls: false,
+        minHeight: 200,
+        minWidth: 200,
+        highlightColor: 0x595335,
+        midtoneColor: 0x2f6a89,
+        lowlightColor: 0x70709,
+        baseColor: 0xbdbcbc,
+        blurFactor: 0.55,
+        speed: 0.40,
+        zoom: 0.90,
+      });
+    }
+    initVanta();
+    return () => {
+      vantaEffect.current?.destroy();
+      vantaEffect.current = null;
+    };
+  }, []);
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(20,184,166,0.18),_transparent_30%),linear-gradient(180deg,_#07111f_0%,_#0b1727_32%,_#f4f7fb_32.1%,_#eef4f8_100%)] text-slate-950">
-      <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-6 sm:px-6 lg:px-8">
-        <header className="rounded-[28px] border border-white/10 bg-slate-950/70 px-5 py-4 shadow-[0_30px_80px_rgba(2,6,23,0.38)] backdrop-blur xl:px-7">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="inline-flex items-center gap-2 rounded-full border border-teal-400/30 bg-teal-400/10 px-3 py-1 text-xs font-semibold tracking-[0.24em] text-teal-200 uppercase">
-                  <Radar className="h-3.5 w-3.5" />
-                  {eyebrow}
-                </span>
-                <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs text-slate-200/80">
-                  <Activity className="h-3.5 w-3.5" />
-                  Crisis-aware supplier intelligence for SMEs
-                </span>
-              </div>
-              <div className="max-w-3xl">
-                <h1 className="font-[family-name:var(--font-display)] text-3xl tracking-tight text-white sm:text-4xl lg:text-[2.8rem]">
-                  {title}
-                </h1>
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-                  {subtitle}
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center lg:max-w-md lg:justify-end">
-              <Link
-                href="/"
-                className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition ${navClass(
-                  pathname === "/",
-                )}`}
-              >
-                Dashboard
-              </Link>
-              <Link
-                href="/request"
-                className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition ${navClass(
-                  pathname === "/request",
-                )}`}
-              >
-                New Request
-              </Link>
-              <Link
-                href="/request"
-                className="inline-flex items-center justify-center gap-2 rounded-full bg-teal-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-teal-300"
-              >
-                Create urgent request
-                <ArrowRight className="h-4 w-4" />
-              </Link>
+    <LocationContext.Provider value={location}>
+      <div className="relative min-h-screen text-white">
+        <div ref={vantaRef} className="fixed inset-0 -z-10" />
+        <nav
+          className="relative z-50 flex justify-center px-6 py-5"
+          style={{ background: "linear-gradient(to bottom, #000000 0%, transparent 100%)" }}
+        >
+          <div className="relative">
+            <button
+              onClick={() => setOpen((o) => !o)}
+              className="flex items-center gap-0.75 text-sm font-medium text-white/90 transition hover:text-white"
+            >
+              <span>{location}</span>
+              <ChevronDown
+                className={`h-4 w-4 text-white/70 transition-transform duration-200 ${open ? "rotate-180" : "rotate-0"}`}
+              />
+            </button>
+
+            <div
+              className={`absolute left-1/2 top-full mt-2 -translate-x-1/2 transition-all duration-200 ease-out ${
+                open
+                  ? "pointer-events-auto translate-y-0 opacity-100"
+                  : "pointer-events-none -translate-y-1 opacity-0"
+              }`}
+            >
+              {LOCATIONS.map((loc) => (
+                <button
+                  key={loc}
+                  onClick={() => {
+                    setLocation(loc);
+                    setOpen(false);
+                  }}
+                  className={`block w-full whitespace-nowrap px-3 py-1.5 text-center text-sm transition hover:text-white ${
+                    loc === location ? "font-medium text-white" : "text-white/50"
+                  }`}
+                >
+                  {loc}
+                </button>
+              ))}
             </div>
           </div>
-        </header>
+        </nav>
 
-        <main className="flex-1 py-6">{children}</main>
+        <main className="relative z-10 flex-1">{children}</main>
       </div>
-    </div>
+    </LocationContext.Provider>
   );
 }

@@ -13,11 +13,7 @@ export default async function Home({
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
 
   return (
-    <SiteShell
-      eyebrow="Live Dashboard"
-      title="ProcurePilot keeps procurement simple while the Lua agent does the heavy lifting."
-      subtitle="Start with one plain-English procurement request. The live Lua agent will ask follow-up questions, build the shortlist, and open a live negotiation room when you are ready."
-    >
+    <SiteShell>
       <DashboardView requests={requests} initialRequestId={resolvedSearchParams?.request} />
     </SiteShell>
   );
