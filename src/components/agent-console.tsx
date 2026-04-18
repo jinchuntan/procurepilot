@@ -1,26 +1,20 @@
 "use client";
 
-import { useDeferredValue, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bot,
+  ExternalLink,
   LoaderCircle,
-  MessageSquare,
   RotateCcw,
-  Send,
   ShieldAlert,
   SlidersHorizontal,
   TriangleAlert,
 } from "lucide-react";
+import { LiquidMetalButton } from "@/components/liquid-metal-button";
 import { defaultWeights } from "@/lib/data";
-import { buildLiveSellerLinks } from "@/lib/live-seller-links";
+import { formatDate, formatDays, formatPercent } from "@/lib/format";
+import { useLocation } from "@/lib/location-context";
 import {
-  formatCurrency,
-  formatDate,
-  formatDays,
-  formatPercent,
-} from "@/lib/format";
-import {
-  EmailNegotiationStatus,
   Priority,
   ProcurementAssessment,
   RecommendationKey,
@@ -160,7 +154,7 @@ function buildRecommendationPrompt(assessment: ProcurementAssessment) {
     "You are ProcurePilot, continuing the buyer conversation after the shortlist has been prepared.",
     `Request: ${assessment.request.quantity} units of ${assessment.request.itemName}, required by ${assessment.request.requiredBy}, budget ceiling USD ${assessment.request.budgetMax}.`,
     `Top options: ${options}.`,
-    "Explain briefly that the recommendation tiles are ready below and ask the buyer to choose one if they want you to start the email negotiation.",
+    "Explain briefly that the recommendation tiles are ready below and ask the buyer to choose one if they want you to open a live negotiation room.",
     "Respond in no more than two short sentences.",
   ].join(" ");
 }
@@ -387,8 +381,10 @@ function getRecommendationEntries(assessment: ProcurementAssessment) {
 
 function SupplierComparisonTable({
   assessment,
+  formatCurrency,
 }: Readonly<{
   assessment: ProcurementAssessment;
+  formatCurrency: (value: number) => string;
 }>) {
   return (
     <div className="overflow-x-auto">
@@ -415,7 +411,9 @@ function SupplierComparisonTable({
             >
               <td className={`px-3 py-4 ${index === 0 ? "rounded-l-2xl" : ""}`}>
                 <div className="font-semibold">{quote.supplierName}</div>
-                <div className={`mt-1 text-xs ${index === 0 ? "text-slate-300" : "text-slate-500"}`}>
+                <div
+                  className={`mt-1 text-xs ${index === 0 ? "text-slate-300" : "text-slate-500"}`}
+                >
                   {quote.region}
                 </div>
                 {quote.flags.length > 0 ? (
@@ -456,13 +454,41 @@ function SupplierComparisonTable({
   );
 }
 
+function SummaryBlock({
+  title,
+  value,
+  hint,
+}: Readonly<{
+  title: string;
+  value: string;
+  hint: string;
+}>) {
+  return (
+    <div className="rounded-[24px] border border-white/12 bg-white/8 p-4 backdrop-blur-sm">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/55">{title}</p>
+      <p className="mt-3 text-lg font-semibold text-white">{value}</p>
+      <p className="mt-2 text-sm leading-6 text-white/60">{hint}</p>
+    </div>
+  );
+}
+
 export function AgentConsole({
   initialRequestId,
 }: Readonly<{
   initialRequestId?: string;
 }>) {
-  const sellerContactEmail =
-    process.env.NEXT_PUBLIC_NEGOTIATION_RECIPIENT_EMAIL ?? "chunchun266@gmail.com";
+  const location = useLocation();
+  const formatCurrency = useMemo(() => {
+    const currency = location === "Malaysia" ? "MYR" : "SGD";
+    const locale = location === "Malaysia" ? "ms-MY" : "en-SG";
+
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format;
+  }, [location]);
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [step, setStep] = useState<InterviewStep>("item");
@@ -478,10 +504,12 @@ export function AgentConsole({
   const [error, setError] = useState<string | null>(null);
   const [selectedRecommendationKey, setSelectedRecommendationKey] =
     useState<RecommendationKey | null>(null);
-  const [emailNegotiation, setEmailNegotiation] = useState<EmailNegotiationStatus | null>(null);
+  const [negotiationRoomHref, setNegotiationRoomHref] = useState<string | null>(null);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [sending, setSending] = useState(false);
   const reweightReadyRef = useRef(false);
   const initializedRef = useRef(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   async function appendAgentQuestion(
     nextStep: Exclude<InterviewStep, "recommendations">,
@@ -521,7 +549,7 @@ export function AgentConsole({
     setAssessment(null);
     setError(null);
     setSelectedRecommendationKey(null);
-    setEmailNegotiation(null);
+    setNegotiationRoomHref(null);
     setShowAnalysis(false);
     setWeights(defaultWeights);
     reweightReadyRef.current = false;
@@ -557,7 +585,7 @@ export function AgentConsole({
       setMessages([
         {
           role: "assistant",
-          text: `I loaded your saved brief for ${data.request.itemName}. The recommendation tiles and comparison are ready below, and I can start the email negotiation once you pick one option.`,
+          text: `I loaded your saved brief for ${data.request.itemName}. The recommendation tiles and comparison are ready below, and I can open a live negotiation room once you pick one option.`,
         },
       ]);
       reweightReadyRef.current = false;
@@ -646,47 +674,21 @@ export function AgentConsole({
   }, [deferredWeights, requestId]);
 
   useEffect(() => {
-    if (
-      !emailNegotiation?.sessionId ||
-      emailNegotiation.delivery === "accepted" ||
-      emailNegotiation.delivery === "rejected"
-    ) {
-      return;
-    }
-
-    const intervalId = window.setInterval(async () => {
-      try {
-        const response = await fetch(`/api/agent/email-negotiate/${emailNegotiation.sessionId}`, {
-          cache: "no-store",
-        });
-        const data = (await response.json()) as {
-          negotiation?: EmailNegotiationStatus;
-          error?: string;
-        };
-
-        if (response.ok && data.negotiation) {
-          setEmailNegotiation(data.negotiation);
-        }
-      } catch {
-        // Keep the last visible status if polling fails.
-      }
-    }, 8000);
-
-    return () => window.clearInterval(intervalId);
-  }, [emailNegotiation?.delivery, emailNegotiation?.sessionId]);
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, questionPending, assessmentPending]);
 
   async function buildRecommendations(nextDraft: InterviewDraft) {
     try {
       setAssessmentPending(true);
       setError(null);
       setSelectedRecommendationKey(null);
-      setEmailNegotiation(null);
+      setNegotiationRoomHref(null);
 
       setMessages((current) => [
         ...current,
         {
           role: "assistant",
-          text: "I’m building the supplier shortlist now and I’ll surface the strongest options in tiles below.",
+          text: "I'm building the supplier shortlist now and I'll surface the strongest options below.",
         },
       ]);
 
@@ -753,7 +755,7 @@ export function AgentConsole({
           ...current,
           {
             role: "assistant",
-            text: "The recommendation tiles are ready below. Pick one if you want me to prepare the email negotiation and keep the website focused on deal status.",
+            text: "The recommendation tiles are ready below. Pick one if you want me to open a live negotiation room where you can play the seller and I'll negotiate as the buyer.",
           },
         ]);
       }
@@ -776,16 +778,16 @@ export function AgentConsole({
     }
   }
 
-  async function submitAnswer(rawAnswer: string) {
-    const answer = rawAnswer.trim();
-
-    if (!answer || questionPending || assessmentPending || step === "recommendations") {
+  async function submitAnswer(answer: string) {
+    if (!answer || questionPending || assessmentPending) {
       return;
     }
 
     setMessages((current) => [...current, { role: "user", text: answer }]);
     setInputValue("");
     setError(null);
+    setSending(true);
+    window.setTimeout(() => setSending(false), 350);
 
     if (step === "item") {
       const nextDraft = { ...draft, itemName: answer };
@@ -901,15 +903,36 @@ export function AgentConsole({
       };
       setDraft(nextDraft);
       await buildRecommendations(nextDraft);
+      return;
+    }
+
+    if (step === "recommendations") {
+      try {
+        setQuestionPending(true);
+        const data = await postAgentMessage(answer, threadId);
+        setThreadId(data.threadId);
+        setMessages((current) => [...current, { role: "assistant", text: data.reply }]);
+      } catch {
+        setMessages((current) => [
+          ...current,
+          { role: "assistant", text: "Sorry, I couldn't process that. Please try again." },
+        ]);
+      } finally {
+        setQuestionPending(false);
+      }
     }
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await submitAnswer(inputValue);
+    await submitAnswer(inputValue.trim());
   }
 
-  async function handleStartEmailNegotiation(recommendationKey: RecommendationKey) {
+  function handleOptionClick(option: string) {
+    void submitAnswer(option);
+  }
+
+  async function handleOpenNegotiationRoom(recommendationKey: RecommendationKey) {
     if (!requestId || recommendationPending) {
       return;
     }
@@ -919,7 +942,7 @@ export function AgentConsole({
       setSelectedRecommendationKey(recommendationKey);
       setError(null);
 
-      const response = await fetch("/api/agent/email-negotiate", {
+      const response = await fetch("/api/agent/negotiation/session", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -930,504 +953,319 @@ export function AgentConsole({
         }),
       });
       const data = (await response.json()) as {
-        negotiation?: EmailNegotiationStatus;
+        href?: string;
         error?: string;
       };
 
-      if (!response.ok || !data.negotiation) {
-        throw new Error(data.error ?? "Failed to start email negotiation.");
+      if (!response.ok || !data.href) {
+        throw new Error(data.error ?? "Failed to open the negotiation room.");
       }
 
-      const negotiation = data.negotiation;
-
-      setEmailNegotiation(negotiation);
+      setNegotiationRoomHref(data.href);
       setMessages((current) => [
         ...current,
         {
           role: "assistant",
-          text:
-            negotiation.delivery === "waiting_reply"
-              ? `I've started the email negotiation with ${negotiation.recipientEmail}. I'll keep the website focused on deal status while the seller conversation runs off-platform.`
-              : `I prepared the email negotiation for ${negotiation.recipientEmail}. The site will now track deal status here while the draft is ready in Gmail.`,
+          text: "The live seller room is ready. Open it below, play the supplier, and I'll negotiate there as the buyer until we close the deal.",
         },
       ]);
-
-      if (negotiation.composeUrl) {
-        window.open(negotiation.composeUrl, "_blank", "noopener,noreferrer");
-      }
     } catch (roomError) {
-      setError(
-        roomError instanceof Error ? roomError.message : "Failed to start email negotiation.",
-      );
-    } finally {
-      setRecommendationPending(false);
-    }
-  }
-
-  async function handleNegotiationDecision(decision: "accepted" | "rejected") {
-    if (!emailNegotiation?.sessionId || recommendationPending) {
-      return;
-    }
-
-    try {
-      setRecommendationPending(true);
-      const response = await fetch(
-        `/api/agent/email-negotiate/${emailNegotiation.sessionId}/decision`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ decision }),
-        },
-      );
-      const data = (await response.json()) as {
-        negotiation?: EmailNegotiationStatus;
-        error?: string;
-      };
-
-      if (!response.ok || !data.negotiation) {
-        throw new Error(data.error ?? "Failed to update buyer decision.");
-      }
-
-      setEmailNegotiation(data.negotiation);
-      setMessages((current) => [
-        ...current,
-        {
-          role: "assistant",
-          text:
-            decision === "accepted"
-              ? "The buyer approved the negotiated deal. ProcurePilot has marked this sourcing path as awarded."
-              : "The buyer rejected the negotiated deal. ProcurePilot has closed this sourcing path without award.",
-        },
-      ]);
-    } catch (decisionError) {
-      setError(
-        decisionError instanceof Error
-          ? decisionError.message
-          : "Failed to update buyer decision.",
-      );
+      setError(roomError instanceof Error ? roomError.message : "Failed to open negotiation room.");
     } finally {
       setRecommendationPending(false);
     }
   }
 
   const recommendationEntries = assessment ? getRecommendationEntries(assessment) : [];
-  const activeRecommendationKey = selectedRecommendationKey ?? "overall";
-  const liveSellerLinks = assessment
-    ? buildLiveSellerLinks(assessment, activeRecommendationKey)
-    : [];
   const inputPlaceholder =
     step === "notes"
       ? 'Type your notes or "skip"'
       : step === "recommendations"
-        ? "Choose a recommendation tile below to continue"
+        ? "Ask a follow-up question..."
         : "Type your answer here";
-  const suggestedReplies = getSuggestedReplies(step, draft);
+  const currentStepOptions = step !== "recommendations" ? getSuggestedReplies(step, draft) : [];
 
   return (
-    <section className="space-y-6">
-      <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)] sm:p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex items-start gap-3">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-teal-50 text-teal-700">
-              <Bot className="h-5 w-5" />
-            </span>
-            <div>
-              <h2 className="font-[family-name:var(--font-display)] text-xl text-slate-950">
-                Agent-Led Sourcing Flow
-              </h2>
-              <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                Start with one plain-English procurement need. ProcurePilot will ask the next
-                question, build the shortlist, and only reveal comparison details when they are
-                ready.
+    <section className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-teal-200/80">
+            Interactive Sourcing Flow
+          </p>
+          <h2 className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">
+            Let ProcurePilot interview the buyer and build the shortlist live.
+          </h2>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => void bootConversation()}
+          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm font-medium text-white/80 transition hover:bg-white/10 hover:text-white"
+        >
+          <RotateCcw className="h-4 w-4" />
+          Restart flow
+        </button>
+      </div>
+
+      <div className="rounded-[30px] border border-white/10 bg-black/35 p-4 shadow-[0_30px_80px_rgba(2,6,23,0.28)] backdrop-blur sm:p-5">
+        <div className="max-h-[360px] space-y-3 overflow-y-auto pr-1">
+          {messages.map((message, index) => (
+            <div
+              key={`${message.role}-${index}`}
+              className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
+            >
+              <p
+                className={`max-w-[88%] rounded-[22px] px-4 py-3 text-sm leading-6 ${
+                  message.role === "assistant"
+                    ? "border border-white/10 bg-white/6 text-white/82"
+                    : "bg-white/14 text-white"
+                }`}
+              >
+                {message.text}
               </p>
             </div>
+          ))}
+
+          {questionPending || assessmentPending ? (
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-white/75">
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+              {assessmentPending ? "Building your shortlist..." : "Thinking..."}
+            </div>
+          ) : null}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {currentStepOptions.length > 0 && step !== "recommendations" ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {currentStepOptions.map((option, index) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => handleOptionClick(option)}
+                disabled={questionPending || assessmentPending}
+                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-sm text-white/80 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/10 text-[11px] font-semibold text-white/60">
+                  {String.fromCharCode(65 + index)}
+                </span>
+                {option}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <form onSubmit={handleSubmit} className="mt-4 flex items-center gap-3 rounded-[24px] border border-white/10 bg-white/6 px-4 py-3">
+          <input
+            value={inputValue}
+            onChange={(event) => setInputValue(event.target.value)}
+            disabled={questionPending || assessmentPending}
+            placeholder={inputPlaceholder}
+            className="flex-1 bg-transparent py-1 text-sm text-white outline-none placeholder:text-white/32"
+          />
+          <LiquidMetalButton disabled={questionPending || assessmentPending} sending={sending} />
+        </form>
+      </div>
+
+      {error ? (
+        <div className="rounded-[20px] border border-rose-300/40 bg-rose-500/20 px-4 py-3 text-sm text-rose-100">
+          {error}
+        </div>
+      ) : null}
+
+      {assessment ? (
+        <div className="space-y-5">
+          <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="rounded-[28px] border border-white/10 bg-black/35 p-5 backdrop-blur">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-white/55">
+                Procurement Brief
+              </p>
+              <h3 className="mt-3 font-[family-name:var(--font-display)] text-2xl text-white">
+                {assessment.request.itemName}
+              </h3>
+              <p className="mt-3 text-sm leading-6 text-white/70">{assessment.summary}</p>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <SummaryBlock
+                  title="Required by"
+                  value={formatDate(assessment.request.requiredBy)}
+                  hint="Target date collected during the interview flow."
+                />
+                <SummaryBlock
+                  title="Budget ceiling"
+                  value={formatCurrency(assessment.request.budgetMax)}
+                  hint="Current budget envelope used in scoring."
+                />
+                <SummaryBlock
+                  title="Priority"
+                  value={assessment.request.priority}
+                  hint="Urgency fit changes the ranking and fallback logic."
+                />
+                <SummaryBlock
+                  title="Notes"
+                  value={assessment.request.notes || "No extra notes"}
+                  hint="Extra context stays attached to the recommendation set."
+                />
+              </div>
+            </div>
+
+            <div className="rounded-[28px] border border-white/10 bg-white/92 p-5 text-slate-950 shadow-[0_24px_60px_rgba(15,23,42,0.12)]">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+                Best Overall Supplier
+              </p>
+              <h3 className="mt-3 font-[family-name:var(--font-display)] text-2xl">
+                {assessment.recommendations.overall.supplier.supplierName}
+              </h3>
+              <p className="mt-3 text-sm leading-6 text-slate-600">
+                {assessment.recommendations.overall.reason}
+              </p>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-[20px] border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Total cost</p>
+                  <p className="mt-2 font-semibold text-slate-950">
+                    {formatCurrency(assessment.recommendations.overall.supplier.totalCost)}
+                  </p>
+                </div>
+                <div className="rounded-[20px] border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Lead time</p>
+                  <p className="mt-2 font-semibold text-slate-950">
+                    {formatDays(assessment.recommendations.overall.supplier.leadTimeDays)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            {recommendationEntries.map(({ key, entry }) => {
+              const selected = selectedRecommendationKey === key;
+              const isRoomOpen = selected && !!negotiationRoomHref;
+
+              return (
+                <div
+                  key={key}
+                  className={`flex flex-col rounded-[28px] border p-5 transition ${
+                    selected
+                      ? "border-white/28 bg-white/12 text-white"
+                      : "border-white/10 bg-black/30 text-white hover:border-white/18 hover:bg-black/35"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/60">
+                        {entry.label}
+                      </p>
+
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-semibold ${
+                            selected ? "bg-white/14 text-white" : "bg-white text-slate-950"
+                          }`}
+                        >
+                          {supplierMonogram(entry.supplier.supplierName)}
+                        </span>
+
+                        <div>
+                          <p className="text-lg font-semibold">{entry.supplier.supplierName}</p>
+                          <p className="mt-1 text-sm text-white/58">
+                            {entry.supplier.region} | {entry.supplier.country}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <span className="inline-flex rounded-full border border-white/12 bg-white/8 px-3 py-1 text-sm font-semibold text-white/80">
+                      {entry.supplier.finalScore}
+                    </span>
+                  </div>
+
+                  <p className="mt-4 text-sm leading-7 text-white/72">{entry.reason}</p>
+
+                  <div className="mt-4 flex flex-wrap gap-3 text-sm text-white/60">
+                    <span>{formatCurrency(entry.supplier.totalCost)}</span>
+                    <span>{formatDays(entry.supplier.leadTimeDays)}</span>
+                    <span>{entry.supplier.riskLevel} risk</span>
+                  </div>
+
+                  {isRoomOpen ? (
+                    <Link
+                      href={negotiationRoomHref}
+                      className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-teal-300 transition hover:text-teal-200"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Open negotiation room
+                    </Link>
+                  ) : null}
+
+                  <div className="mt-auto flex gap-2 pt-5">
+                    <button
+                      type="button"
+                      onClick={() => void handleOpenNegotiationRoom(key)}
+                      disabled={recommendationPending}
+                      className="flex-1 rounded-full border border-white/12 bg-white/6 px-4 py-2 text-sm font-medium text-white/80 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {selected && recommendationPending ? "Opening..." : "Negotiate"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleOpenNegotiationRoom(key)}
+                      disabled={recommendationPending}
+                      className="flex-1 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Buy Now
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           <button
             type="button"
-            onClick={() => void bootConversation()}
-            className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+            onClick={() => setShowAnalysis((current) => !current)}
+            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm font-medium text-white/80 transition hover:bg-white/10 hover:text-white"
           >
-            <RotateCcw className="h-4 w-4" />
-            Restart flow
+            {showAnalysis ? "Hide comparison details" : "Show comparison details"}
           </button>
-        </div>
-
-        <div className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-            <MessageSquare className="h-4 w-4" />
-            Guided procurement interview
-          </div>
-
-          <div className="mt-4 max-h-[360px] space-y-3 overflow-y-auto pr-1">
-            {messages.map((message, index) => (
-              <div
-                key={`${message.role}-${index}`}
-                className={`max-w-3xl rounded-[22px] px-4 py-3 text-sm leading-6 ${
-                  message.role === "assistant"
-                    ? "border border-slate-200 bg-white text-slate-700"
-                    : "ml-auto bg-slate-950 text-white"
-                }`}
-              >
-                {message.text}
-              </div>
-            ))}
-
-            {questionPending || assessmentPending ? (
-              <div className="inline-flex items-center gap-2 rounded-[22px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-                {assessmentPending
-                  ? "ProcurePilot is building the shortlist..."
-                  : "ProcurePilot is thinking..."}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="mt-4 rounded-[28px] border border-slate-200 bg-white p-3 shadow-[0_14px_34px_rgba(15,23,42,0.05)]">
-            {suggestedReplies.length > 0 ? (
-              <div className="flex flex-wrap gap-2 border-b border-slate-100 px-1 pb-3">
-                {suggestedReplies.map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    type="button"
-                    onClick={() => void submitAnswer(suggestion)}
-                    disabled={questionPending || assessmentPending}
-                    className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 transition hover:border-teal-200 hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-
-            <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
-              <div className="flex-1">
-                <p className="px-1 text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                  Tap a quick reply or type your own
-                </p>
-                <input
-                  value={inputValue}
-                  onChange={(event) => setInputValue(event.target.value)}
-                  disabled={step === "recommendations" || questionPending || assessmentPending}
-                  placeholder={inputPlaceholder}
-                  className="mt-2 w-full rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-teal-400 focus:bg-white"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={step === "recommendations" || questionPending || assessmentPending}
-                className="inline-flex items-center justify-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-              >
-                Send
-                <Send className="h-4 w-4" />
-              </button>
-            </form>
-          </div>
-
-          {error ? (
-            <div className="mt-4 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-              {error}
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      {assessment ? (
-        <div className="space-y-6">
-          <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)] sm:p-6">
-            <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
-                <div className="grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Item</p>
-                    <p className="mt-1 font-semibold text-slate-900">{assessment.request.itemName}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Required by</p>
-                    <p className="mt-1 font-semibold text-slate-900">
-                      {formatDate(assessment.request.requiredBy)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Budget</p>
-                    <p className="mt-1 font-semibold text-slate-900">
-                      {formatCurrency(assessment.request.budgetMin)} -{" "}
-                      {formatCurrency(assessment.request.budgetMax)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Priority</p>
-                    <p className="mt-1 font-semibold text-slate-900">{assessment.request.priority}</p>
-                  </div>
-                </div>
-
-                <div className="mt-4 rounded-[20px] border border-slate-200 bg-white p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Notes</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-700">
-                    {assessment.request.notes || "No extra notes were provided."}
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded-[24px] bg-slate-950 p-5 text-white">
-                <p className="text-sm text-slate-300">Best overall supplier</p>
-                <h3 className="mt-3 font-[family-name:var(--font-display)] text-2xl">
-                  {assessment.recommendations.overall.supplier.supplierName}
-                </h3>
-                <p className="mt-3 text-sm leading-6 text-slate-200">{assessment.summary}</p>
-                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-2xl bg-white/6 p-3">
-                    <p className="text-slate-300">Total cost</p>
-                    <p className="mt-1 font-semibold text-white">
-                      {formatCurrency(assessment.recommendations.overall.supplier.totalCost)}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl bg-white/6 p-3">
-                    <p className="text-slate-300">Lead time</p>
-                    <p className="mt-1 font-semibold text-white">
-                      {formatDays(assessment.recommendations.overall.supplier.leadTimeDays)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              {recommendationEntries.map(({ key, entry }) => {
-                const selected = selectedRecommendationKey === key;
-
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => void handleStartEmailNegotiation(key)}
-                    disabled={recommendationPending}
-                    className={`rounded-[28px] border p-5 text-left transition ${
-                      selected
-                        ? "border-slate-950 bg-slate-950 text-white shadow-[0_20px_40px_rgba(15,23,42,0.18)]"
-                        : "border-slate-200 bg-white hover:border-teal-200 hover:bg-teal-50"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="space-y-3">
-                        <p
-                          className={`text-xs font-semibold uppercase tracking-[0.22em] ${
-                            selected ? "text-slate-300" : "text-slate-500"
-                          }`}
-                        >
-                          {entry.label}
-                        </p>
-                        <div className="flex items-center gap-3">
-                          <span
-                            className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-semibold ${
-                              selected ? "bg-white/10 text-white" : "bg-slate-950 text-white"
-                            }`}
-                          >
-                            {supplierMonogram(entry.supplier.supplierName)}
-                          </span>
-                          <div>
-                            <p className="text-xl font-semibold">{entry.supplier.supplierName}</p>
-                            <p
-                              className={`mt-1 text-sm ${
-                                selected ? "text-slate-300" : "text-slate-500"
-                              }`}
-                            >
-                              {entry.supplier.region} | {entry.supplier.country}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div
-                        className={`inline-flex rounded-full border px-3 py-1 text-sm font-semibold ${
-                          selected
-                            ? "border-white/15 bg-white/8 text-white"
-                            : "border-slate-200 bg-slate-50 text-slate-700"
-                        }`}
-                      >
-                        {entry.supplier.finalScore}
-                      </div>
-                    </div>
-
-                    <p
-                      className={`mt-4 text-sm leading-7 ${
-                        selected ? "text-slate-100" : "text-slate-600"
-                      }`}
-                    >
-                      {entry.reason}
-                    </p>
-
-                    <div
-                      className={`mt-4 flex flex-wrap gap-3 text-sm ${
-                        selected ? "text-slate-200" : "text-slate-500"
-                      }`}
-                    >
-                      <span>Total {formatCurrency(entry.supplier.totalCost)}</span>
-                      <span>{formatDays(entry.supplier.leadTimeDays)}</span>
-                      <span>{entry.supplier.riskLevel} risk</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="mt-5 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm font-semibold text-slate-900">Live seller websites</p>
-                <p className="mt-1 text-sm leading-6 text-slate-600">
-                  These links are generated from the AI recommendation so you can open live seller
-                  and distributor search results instead of relying on fake listings.
-                </p>
-                <div className="mt-4 space-y-3">
-                  {liveSellerLinks.map((link) => (
-                    <a
-                      key={link.label}
-                      href={link.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block rounded-[20px] border border-slate-200 bg-white px-4 py-3 transition hover:border-teal-200 hover:bg-teal-50"
-                    >
-                      <p className="text-sm font-semibold text-slate-900">{link.label}</p>
-                      <p className="mt-1 text-sm leading-6 text-slate-600">{link.description}</p>
-                    </a>
-                  ))}
-                </div>
-              </div>
-
-              {emailNegotiation ? (
-                <div className="rounded-[24px] border border-teal-200 bg-teal-50 p-4">
-                  <p className="text-sm font-semibold text-teal-900">
-                    {emailNegotiation.headline}
-                  </p>
-                  <p className="mt-2 text-sm leading-6 text-teal-800">
-                    {emailNegotiation.detail}
-                  </p>
-                  <div className="mt-4 rounded-[20px] border border-teal-200 bg-white px-4 py-3">
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Seller inbox
-                    </p>
-                    <p className="mt-1 font-semibold text-slate-950">
-                      {emailNegotiation.recipientEmail}
-                    </p>
-                    <p className="mt-3 text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Buyer inbox
-                    </p>
-                    <p className="mt-1 font-semibold text-slate-950">
-                      {emailNegotiation.senderEmail}
-                    </p>
-                    <p className="mt-3 text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Subject
-                    </p>
-                    <p className="mt-1 font-semibold text-slate-950">
-                      {emailNegotiation.subject}
-                    </p>
-                    <p className="mt-3 text-xs uppercase tracking-[0.18em] text-slate-500">
-                      Latest buyer message
-                    </p>
-                    <p className="mt-2 text-sm leading-6 text-slate-700">
-                      {emailNegotiation.latestBuyerMessage}
-                    </p>
-                  </div>
-                  {emailNegotiation.composeUrl ? (
-                    <a
-                      href={emailNegotiation.composeUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-4 inline-flex items-center justify-center rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
-                    >
-                      Open Gmail draft
-                    </a>
-                  ) : null}
-                  {emailNegotiation.actionRequired ? (
-                    <p className="mt-4 text-sm leading-6 text-teal-900">
-                      {emailNegotiation.actionRequired}
-                    </p>
-                  ) : null}
-                  {emailNegotiation.delivery === "deal_ready" ? (
-                    <div className="mt-4 flex flex-wrap gap-3">
-                      <button
-                        type="button"
-                        disabled={recommendationPending}
-                        onClick={() => void handleNegotiationDecision("accepted")}
-                        className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-                      >
-                        Accept deal
-                      </button>
-                      <button
-                        type="button"
-                        disabled={recommendationPending}
-                        onClick={() => void handleNegotiationDecision("rejected")}
-                        className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
-                      >
-                        Reject deal
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
-                  <p className="text-sm font-semibold text-slate-900">Email negotiation</p>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">
-                    Pick one recommendation tile and ProcurePilot will prepare the buyer&apos;s email
-                    negotiation against {sellerContactEmail} while this page stays focused on deal
-                    status.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => setShowAnalysis((current) => !current)}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-              >
-                {showAnalysis ? "Hide comparison details" : "Show comparison details"}
-              </button>
-
-              {assessment.warnings.length > 0 ? (
-                <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
-                  {assessment.warnings.length} risk note{assessment.warnings.length === 1 ? "" : "s"}
-                </span>
-              ) : null}
-            </div>
-          </div>
 
           {showAnalysis ? (
-            <div className="space-y-6">
-              <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)] sm:p-6">
-                <div className="flex items-start gap-3">
-                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                    <ShieldAlert className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <h3 className="font-[family-name:var(--font-display)] text-xl text-slate-950">
-                      Supplier Comparison
-                    </h3>
-                    <p className="mt-1 text-sm text-slate-600">
-                      Ranked shortlist generated during the conversation flow.
-                    </p>
+            <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="space-y-4">
+                <div className="rounded-[28px] border border-white/10 bg-white/92 p-5 text-slate-950 shadow-[0_24px_60px_rgba(15,23,42,0.12)]">
+                  <div className="flex items-start gap-3">
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
+                      <ShieldAlert className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <h3 className="font-[family-name:var(--font-display)] text-xl">
+                        Supplier Comparison
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Ranked shortlist generated during the conversation flow.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-5">
+                    <SupplierComparisonTable
+                      assessment={assessment}
+                      formatCurrency={formatCurrency}
+                    />
                   </div>
                 </div>
-                <div className="mt-5">
-                  <SupplierComparisonTable assessment={assessment} />
-                </div>
-              </div>
 
-              <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-                <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)] sm:p-6">
+                <div className="rounded-[28px] border border-white/10 bg-white/92 p-5 text-slate-950 shadow-[0_24px_60px_rgba(15,23,42,0.12)]">
                   <div className="flex items-start gap-3">
                     <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
                       <SlidersHorizontal className="h-5 w-5" />
                     </span>
                     <div>
-                      <h3 className="font-[family-name:var(--font-display)] text-xl text-slate-950">
+                      <h3 className="font-[family-name:var(--font-display)] text-xl">
                         Decision Weights
                       </h3>
                       <p className="mt-1 text-sm text-slate-600">
-                        Adjust the scoring logic without leaving the conversation flow.
+                        Reweight the shortlist without leaving the current workflow.
                       </p>
                     </div>
                   </div>
@@ -1437,8 +1275,9 @@ export function AgentConsole({
                       <label key={entry.key} className="block space-y-2">
                         <div className="flex items-center justify-between text-sm">
                           <span className="font-medium text-slate-700">{entry.label}</span>
-                          <span className="font-semibold text-slate-900">{weights[entry.key]}</span>
+                          <span className="font-semibold text-slate-950">{weights[entry.key]}</span>
                         </div>
+
                         <input
                           type="range"
                           min={0}
@@ -1454,95 +1293,95 @@ export function AgentConsole({
                         />
                       </label>
                     ))}
+                  </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setWeights(defaultWeights)}
-                      className="rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-                    >
-                      Reset balanced preset
-                    </button>
+                  <button
+                    type="button"
+                    onClick={() => setWeights(defaultWeights)}
+                    className="mt-5 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                  >
+                    Reset balanced preset
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="rounded-[28px] border border-white/10 bg-white/92 p-5 text-slate-950 shadow-[0_24px_60px_rgba(15,23,42,0.12)]">
+                  <div className="flex items-start gap-3">
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
+                      <ShieldAlert className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <h3 className="font-[family-name:var(--font-display)] text-xl">
+                        Risk Insights
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Disruption signals surfaced only after the shortlist was scored.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 space-y-3">
+                    {assessment.riskInsights.map((insight) => (
+                      <div
+                        key={insight.key}
+                        className="rounded-[22px] border border-slate-200 bg-slate-50 p-4"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-semibold text-slate-900">{insight.label}</p>
+                          <span
+                            className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${riskBadge(
+                              insight.severity,
+                            )}`}
+                          >
+                            {insight.severity}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">
+                          {insight.description}
+                        </p>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
-                <div className="space-y-6">
-                  <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)] sm:p-6">
-                    <div className="flex items-start gap-3">
-                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                        <ShieldAlert className="h-5 w-5" />
-                      </span>
-                      <div>
-                        <h3 className="font-[family-name:var(--font-display)] text-xl text-slate-950">
-                          Risk Insights
-                        </h3>
-                        <p className="mt-1 text-sm text-slate-600">
-                          Disruption signals surfaced only after the agent has a real shortlist.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-5 space-y-3">
-                      {assessment.riskInsights.map((insight) => (
-                        <div
-                          key={insight.key}
-                          className="rounded-[22px] border border-slate-200 bg-slate-50 p-4"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="font-semibold text-slate-900">{insight.label}</p>
-                            <span
-                              className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${riskBadge(
-                                insight.severity,
-                              )}`}
-                            >
-                              {insight.severity}
-                            </span>
-                          </div>
-                          <p className="mt-2 text-sm leading-6 text-slate-600">
-                            {insight.description}
-                          </p>
-                        </div>
-                      ))}
+                <div className="rounded-[28px] border border-white/10 bg-white/92 p-5 text-slate-950 shadow-[0_24px_60px_rgba(15,23,42,0.12)]">
+                  <div className="flex items-start gap-3">
+                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
+                      <TriangleAlert className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <h3 className="font-[family-name:var(--font-display)] text-xl">
+                        Substitutes
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Alternatives appear only when the shortlist looks risky or late.
+                      </p>
                     </div>
                   </div>
 
-                  <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_40px_rgba(15,23,42,0.06)] sm:p-6">
-                    <div className="flex items-start gap-3">
-                      <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                        <TriangleAlert className="h-5 w-5" />
-                      </span>
-                      <div>
-                        <h3 className="font-[family-name:var(--font-display)] text-xl text-slate-950">
-                          Substitutes
-                        </h3>
-                        <p className="mt-1 text-sm text-slate-600">
-                          Alternatives appear here only when the shortlist looks risky or late.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-5 space-y-3">
-                      {assessment.substitutes.length ? (
-                        assessment.substitutes.map((substitute) => (
-                          <div
-                            key={substitute.itemId}
-                            className="rounded-[22px] border border-slate-200 bg-slate-50 p-4"
-                          >
-                            <p className="font-semibold text-slate-900">{substitute.itemName}</p>
-                            <p className="mt-1 text-sm text-slate-600">
-                              {substitute.topSupplier} | {substitute.region} |{" "}
-                              {formatDays(substitute.leadTimeDays)}
-                            </p>
-                            <p className="mt-3 text-sm leading-6 text-slate-600">
-                              {substitute.rationale}
-                            </p>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded-[22px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-800">
-                          No substitute escalation is needed for the current shortlist.
+                  <div className="mt-5 space-y-3">
+                    {assessment.substitutes.length ? (
+                      assessment.substitutes.map((substitute) => (
+                        <div
+                          key={substitute.itemId}
+                          className="rounded-[22px] border border-slate-200 bg-slate-50 p-4"
+                        >
+                          <p className="font-semibold text-slate-900">{substitute.itemName}</p>
+                          <p className="mt-1 text-sm text-slate-600">
+                            {substitute.topSupplier} | {substitute.region} |{" "}
+                            {formatDays(substitute.leadTimeDays)}
+                          </p>
+                          <p className="mt-3 text-sm leading-6 text-slate-600">
+                            {substitute.rationale}
+                          </p>
                         </div>
-                      )}
-                    </div>
+                      ))
+                    ) : (
+                      <div className="rounded-[22px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-800">
+                        No substitute escalation is needed for the current shortlist.
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

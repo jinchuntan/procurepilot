@@ -9,7 +9,7 @@ export default async function Home({
 }: Readonly<{
   searchParams?: Promise<{ request?: string }>;
 }>) {
-  const requests = listRequests();
+  const requests = await listRequests();
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
 
   return (

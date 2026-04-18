@@ -125,21 +125,23 @@ npx lua push all --ci --force --auto-deploy
 
 ## Deploying To Vercel
 
-This app is ready for Vercel as a standard Next.js project.
+This app deploys to Vercel as a standard Next.js project, but durable write support on Vercel should use Postgres instead of local SQLite.
 
 If you import the whole workspace/repository into Vercel:
 
 1. Create a new Vercel project.
 2. Set the Root Directory to `procurepilot`.
 3. Keep the detected framework as `Next.js`.
-4. No environment variables are required for local seeded usage.
+4. Add a Postgres integration from the Vercel Marketplace or provide `DATABASE_URL` / `POSTGRES_URL`.
 5. Deploy.
 
-If you upload or connect only the `procurepilot` folder, no extra configuration is needed.
+Local development still uses SQLite in `data/procurepilot.sqlite`, so you can keep the existing local flow unchanged.
 
 The project also includes a lightweight [`vercel.json`](./vercel.json), a Node engine declaration in `package.json`, and a Lua manifest in [`lua.skill.yaml`](./lua.skill.yaml).
 
-Important note:
+Important notes:
+- on Vercel, the app will automatically use Postgres when `DATABASE_URL` or `POSTGRES_URL` is present
+- local SQLite is intended for local development, not durable Vercel persistence
 - the web app itself runs locally and the Lua-backed assessment route works now
 - `lua compile` works locally
 - cloud sync for the Lua agent is still skipped until you add your Lua `agentId`, `orgId`, and API credentials

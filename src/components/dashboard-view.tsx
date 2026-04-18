@@ -15,9 +15,7 @@ function Card({
   return (
     <div className="rounded-[28px] border border-white/10 bg-black/26 p-5 shadow-[0_18px_40px_rgba(2,6,23,0.26)] backdrop-blur">
       <p className="text-sm text-white/55">{title}</p>
-      <p className="mt-3 font-[family-name:var(--font-display)] text-3xl text-white">
-        {value}
-      </p>
+      <p className="mt-3 font-[family-name:var(--font-display)] text-3xl text-white">{value}</p>
       <p className="mt-2 text-sm leading-6 text-white/65">{hint}</p>
     </div>
   );
@@ -34,8 +32,8 @@ export function DashboardView({
     const portfolio = requests.map((request) => {
       const top = scoreQuotesForRequest(request, defaultWeights)[0];
       return {
-        top,
         request,
+        top,
       };
     });
 
