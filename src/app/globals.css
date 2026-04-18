@@ -25,7 +25,6 @@ body {
   margin: 0;
   min-height: 100vh;
   background: #08090f;
-  background: #08090f;
 }
 
 ::selection {
@@ -46,15 +45,10 @@ body {
   background: rgba(15, 23, 42, 0.24);
 }
 
+/* Send button pulse */
 @keyframes send-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.18);
-  }
-
-  50% {
-    box-shadow: 0 0 0 5px rgba(255, 255, 255, 0);
-  }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.18); }
+  50%       { box-shadow: 0 0 0 5px rgba(255, 255, 255, 0); }
 }
 
 .send-btn:not(:disabled) {

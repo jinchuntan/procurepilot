@@ -10,12 +10,7 @@ import {
   NegotiationSessionStatus,
   RecommendationKey,
 } from "@/lib/types";
-import {
-  ensureStorageReady,
-  getDatabase,
-  getPostgresClient,
-  isPostgresConfigured,
-} from "./database";
+import { getDatabase } from "./database";
 import { getRequestById } from "./request-repository";
 
 type SessionRow = {
@@ -99,33 +94,7 @@ function buildReplyPrompt(
   ].join(" ");
 }
 
-async function getSessionRow(sessionId: string) {
-  await ensureStorageReady();
-
-  if (isPostgresConfigured()) {
-    const sql = getPostgresClient();
-    const rows = await sql<SessionRow[]>`
-      SELECT
-        id,
-        request_id,
-        thread_id,
-        supplier_id,
-        supplier_name,
-        recommendation_key,
-        recommendation_label,
-        status,
-        opened_total,
-        target_total,
-        created_at,
-        updated_at
-      FROM negotiation_sessions
-      WHERE id = ${sessionId}
-      LIMIT 1
-    `;
-
-    return rows[0];
-  }
-
+function getSessionRow(sessionId: string) {
   const db = getDatabase();
 
   return db
@@ -151,138 +120,7 @@ async function getSessionRow(sessionId: string) {
     .get(sessionId) as SessionRow | undefined;
 }
 
-async function getLatestSessionRowByRequest(
-  requestId: string,
-  recommendationKey: RecommendationKey,
-) {
-  await ensureStorageReady();
-
-  if (isPostgresConfigured()) {
-    const sql = getPostgresClient();
-    const rows = await sql<SessionRow[]>`
-      SELECT
-        id,
-        request_id,
-        thread_id,
-        supplier_id,
-        supplier_name,
-        recommendation_key,
-        recommendation_label,
-        status,
-        opened_total,
-        target_total,
-        created_at,
-        updated_at
-      FROM negotiation_sessions
-      WHERE request_id = ${requestId} AND recommendation_key = ${recommendationKey}
-      ORDER BY updated_at DESC
-      LIMIT 1
-    `;
-
-    return rows[0];
-  }
-
-  const db = getDatabase();
-
-  return db
-    .prepare(
-      `
-        SELECT
-          id,
-          request_id,
-          thread_id,
-          supplier_id,
-          supplier_name,
-          recommendation_key,
-          recommendation_label,
-          status,
-          opened_total,
-          target_total,
-          created_at,
-          updated_at
-        FROM negotiation_sessions
-        WHERE request_id = ? AND recommendation_key = ?
-        ORDER BY datetime(updated_at) DESC
-        LIMIT 1
-      `,
-    )
-    .get(requestId, recommendationKey) as SessionRow | undefined;
-}
-
-async function getLatestOpenSessionRow() {
-  await ensureStorageReady();
-
-  if (isPostgresConfigured()) {
-    const sql = getPostgresClient();
-    const rows = await sql<SessionRow[]>`
-      SELECT
-        id,
-        request_id,
-        thread_id,
-        supplier_id,
-        supplier_name,
-        recommendation_key,
-        recommendation_label,
-        status,
-        opened_total,
-        target_total,
-        created_at,
-        updated_at
-      FROM negotiation_sessions
-      WHERE status = 'open'
-      ORDER BY updated_at DESC
-      LIMIT 1
-    `;
-
-    return rows[0];
-  }
-
-  const db = getDatabase();
-
-  return db
-    .prepare(
-      `
-        SELECT
-          id,
-          request_id,
-          thread_id,
-          supplier_id,
-          supplier_name,
-          recommendation_key,
-          recommendation_label,
-          status,
-          opened_total,
-          target_total,
-          created_at,
-          updated_at
-        FROM negotiation_sessions
-        WHERE status = 'open'
-        ORDER BY datetime(updated_at) DESC
-        LIMIT 1
-      `,
-    )
-    .get() as SessionRow | undefined;
-}
-
-async function listMessageRows(sessionId: string) {
-  await ensureStorageReady();
-
-  if (isPostgresConfigured()) {
-    const sql = getPostgresClient();
-    return sql<MessageRow[]>`
-      SELECT
-        id,
-        session_id,
-        role,
-        speaker,
-        text,
-        created_at
-      FROM negotiation_messages
-      WHERE session_id = ${sessionId}
-      ORDER BY created_at ASC
-    `;
-  }
-
+function listMessageRows(sessionId: string) {
   const db = getDatabase();
 
   return db
@@ -303,42 +141,14 @@ async function listMessageRows(sessionId: string) {
     .all(sessionId) as MessageRow[];
 }
 
-async function appendMessage(
+function appendMessage(
   sessionId: string,
   role: NegotiationRoomMessage["role"],
   speaker: string,
   text: string,
 ) {
-  const createdAt = new Date().toISOString();
-  const messageId = `msg-${randomUUID().slice(0, 12)}`;
-
-  await ensureStorageReady();
-
-  if (isPostgresConfigured()) {
-    const sql = getPostgresClient();
-
-    await sql`
-      INSERT INTO negotiation_messages (
-        id,
-        session_id,
-        role,
-        speaker,
-        text,
-        created_at
-      ) VALUES (
-        ${messageId},
-        ${sessionId},
-        ${role},
-        ${speaker},
-        ${text},
-        ${createdAt}
-      )
-    `;
-
-    return;
-  }
-
   const db = getDatabase();
+  const createdAt = new Date().toISOString();
 
   db.prepare(
     `
@@ -359,7 +169,7 @@ async function appendMessage(
       )
     `,
   ).run({
-    id: messageId,
+    id: `msg-${randomUUID().slice(0, 12)}`,
     sessionId,
     role,
     speaker,
@@ -368,23 +178,7 @@ async function appendMessage(
   });
 }
 
-async function updateSession(sessionId: string, status: NegotiationSessionStatus) {
-  const updatedAt = new Date().toISOString();
-
-  await ensureStorageReady();
-
-  if (isPostgresConfigured()) {
-    const sql = getPostgresClient();
-
-    await sql`
-      UPDATE negotiation_sessions
-      SET status = ${status}, updated_at = ${updatedAt}
-      WHERE id = ${sessionId}
-    `;
-
-    return;
-  }
-
+function updateSession(sessionId: string, status: NegotiationSessionStatus) {
   const db = getDatabase();
 
   db.prepare(
@@ -396,41 +190,18 @@ async function updateSession(sessionId: string, status: NegotiationSessionStatus
   ).run({
     id: sessionId,
     status,
-    updatedAt,
+    updatedAt: new Date().toISOString(),
   });
 }
 
-export async function setNegotiationDecision(
-  sessionId: string,
-  decision: Extract<NegotiationSessionStatus, "accepted" | "rejected">,
-) {
-  const session = await getSessionRow(sessionId);
-
-  if (!session) {
-    throw new Error(`Negotiation session "${sessionId}" was not found.`);
-  }
-
-  await updateSession(sessionId, decision);
-  await appendMessage(
-    sessionId,
-    "buyer",
-    "ProcurePilot Buyer",
-    decision === "accepted"
-      ? "The buyer approved the negotiated deal and the order can proceed."
-      : "The buyer declined the negotiated terms, so this sourcing path is now closed.",
-  );
-
-  return getNegotiationRoom(sessionId);
-}
-
 export async function getNegotiationRoom(sessionId: string): Promise<NegotiationRoom> {
-  const session = await getSessionRow(sessionId);
+  const session = getSessionRow(sessionId);
 
   if (!session) {
     throw new Error(`Negotiation session "${sessionId}" was not found.`);
   }
 
-  const request = await getRequestById(session.request_id);
+  const request = getRequestById(session.request_id);
 
   if (!request) {
     throw new Error(`Request "${session.request_id}" was not found for this negotiation.`);
@@ -459,7 +230,7 @@ export async function getNegotiationRoom(sessionId: string): Promise<Negotiation
     },
     request,
     recommendation,
-    messages: (await listMessageRows(session.id)).map(mapMessageRow),
+    messages: listMessageRows(session.id).map(mapMessageRow),
   };
 }
 
@@ -467,13 +238,7 @@ export async function createNegotiationRoom(
   requestId: string,
   recommendationKey: RecommendationKey,
 ) {
-  const existingSession = await getLatestSessionRowByRequest(requestId, recommendationKey);
-
-  if (existingSession && existingSession.status !== "accepted" && existingSession.status !== "rejected") {
-    return getNegotiationRoom(existingSession.id);
-  }
-
-  const request = await getRequestById(requestId);
+  const request = getRequestById(requestId);
 
   if (!request) {
     throw new Error(`Request "${requestId}" was not found.`);
@@ -505,14 +270,12 @@ export async function createNegotiationRoom(
     ),
     provisionalThreadId,
   );
+
+  const db = getDatabase();
   const createdAt = new Date().toISOString();
 
-  await ensureStorageReady();
-
-  if (isPostgresConfigured()) {
-    const sql = getPostgresClient();
-
-    await sql`
+  db.prepare(
+    `
       INSERT INTO negotiation_sessions (
         id,
         request_id,
@@ -527,87 +290,48 @@ export async function createNegotiationRoom(
         created_at,
         updated_at
       ) VALUES (
-        ${sessionId},
-        ${requestId},
-        ${openingMessage.threadId},
-        ${recommendation.supplier.supplierId},
-        ${recommendation.supplier.supplierName},
-        ${recommendationKey},
-        ${recommendation.label},
-        ${"open"},
-        ${recommendation.supplier.totalCost},
-        ${targetTerms.negotiatedTotalCost},
-        ${createdAt},
-        ${createdAt}
+        @id,
+        @requestId,
+        @threadId,
+        @supplierId,
+        @supplierName,
+        @recommendationKey,
+        @recommendationLabel,
+        @status,
+        @openedTotal,
+        @targetTotal,
+        @createdAt,
+        @updatedAt
       )
-    `;
-  } else {
-    const db = getDatabase();
+    `,
+  ).run({
+    id: sessionId,
+    requestId,
+    threadId: openingMessage.threadId,
+    supplierId: recommendation.supplier.supplierId,
+    supplierName: recommendation.supplier.supplierName,
+    recommendationKey,
+    recommendationLabel: recommendation.label,
+    status: "open",
+    openedTotal: recommendation.supplier.totalCost,
+    targetTotal: targetTerms.negotiatedTotalCost,
+    createdAt,
+    updatedAt: createdAt,
+  });
 
-    db.prepare(
-      `
-        INSERT INTO negotiation_sessions (
-          id,
-          request_id,
-          thread_id,
-          supplier_id,
-          supplier_name,
-          recommendation_key,
-          recommendation_label,
-          status,
-          opened_total,
-          target_total,
-          created_at,
-          updated_at
-        ) VALUES (
-          @id,
-          @requestId,
-          @threadId,
-          @supplierId,
-          @supplierName,
-          @recommendationKey,
-          @recommendationLabel,
-          @status,
-          @openedTotal,
-          @targetTotal,
-          @createdAt,
-          @updatedAt
-        )
-      `,
-    ).run({
-      id: sessionId,
-      requestId,
-      threadId: openingMessage.threadId,
-      supplierId: recommendation.supplier.supplierId,
-      supplierName: recommendation.supplier.supplierName,
-      recommendationKey,
-      recommendationLabel: recommendation.label,
-      status: "open",
-      openedTotal: recommendation.supplier.totalCost,
-      targetTotal: targetTerms.negotiatedTotalCost,
-      createdAt,
-      updatedAt: createdAt,
-    });
-  }
-
-  await appendMessage(
-    sessionId,
-    "buyer",
-    "ProcurePilot Buyer",
-    stripControlMarkers(openingMessage.reply),
-  );
+  appendMessage(sessionId, "buyer", "ProcurePilot Buyer", stripControlMarkers(openingMessage.reply));
 
   return getNegotiationRoom(sessionId);
 }
 
 export async function replyToNegotiationRoom(sessionId: string, sellerMessage: string) {
-  const session = await getSessionRow(sessionId);
+  const session = getSessionRow(sessionId);
 
   if (!session) {
     throw new Error(`Negotiation session "${sessionId}" was not found.`);
   }
 
-  const request = await getRequestById(session.request_id);
+  const request = getRequestById(session.request_id);
 
   if (!request) {
     throw new Error(`Request "${session.request_id}" was not found.`);
@@ -619,23 +343,10 @@ export async function replyToNegotiationRoom(sessionId: string, sellerMessage: s
     throw new Error("Seller message cannot be empty.");
   }
 
-  await appendMessage(sessionId, "seller", "Seller", trimmedMessage);
+  appendMessage(sessionId, "seller", "Seller", trimmedMessage);
 
   const requestSummary = `${request.quantity} units of ${request.itemName}, required by ${request.requiredBy}, budget ceiling USD ${request.budgetMax}, minimum supplier rating ${request.minSupplierRating}, priority ${request.priority}.`;
   const accepted = sellerAcceptedOffer(trimmedMessage);
-
-  if (accepted) {
-    await appendMessage(
-      sessionId,
-      "buyer",
-      "ProcurePilot Buyer",
-      "Thank you. We have aligned on the commercial terms and I'm marking this deal as ready for buyer approval.",
-    );
-    await updateSession(sessionId, "closed");
-
-    return getNegotiationRoom(sessionId);
-  }
-
   const buyerReply = await sendLiveLuaAgentMessage(
     buildReplyPrompt(
       requestSummary,
@@ -643,29 +354,19 @@ export async function replyToNegotiationRoom(sessionId: string, sellerMessage: s
       session.opened_total,
       session.target_total,
       trimmedMessage,
-      false,
+      accepted,
     ),
     session.thread_id,
   );
-  const closed = /\[DEAL_CLOSED\]/i.test(buyerReply.reply);
+  const closed = accepted || /\[DEAL_CLOSED\]/i.test(buyerReply.reply);
 
-  await appendMessage(
+  appendMessage(
     sessionId,
     "buyer",
     "ProcurePilot Buyer",
     stripControlMarkers(buyerReply.reply),
   );
-  await updateSession(sessionId, closed ? "closed" : "open");
+  updateSession(sessionId, closed ? "closed" : "open");
 
   return getNegotiationRoom(sessionId);
-}
-
-export async function replyToLatestOpenNegotiationRoom(sellerMessage: string) {
-  const session = await getLatestOpenSessionRow();
-
-  if (!session) {
-    throw new Error("No open negotiation session is waiting for a seller reply.");
-  }
-
-  return replyToNegotiationRoom(session.id, sellerMessage);
 }

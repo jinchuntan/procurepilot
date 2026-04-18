@@ -4,12 +4,7 @@ import { randomUUID } from "node:crypto";
 import { getItemById, inferCategoryFromText } from "@/lib/data";
 import { requestDraftSchema } from "@/lib/procurement-schemas";
 import { ProcurementRequest, ProcurementRequestDraft } from "@/lib/types";
-import {
-  ensureStorageReady,
-  getDatabase,
-  getPostgresClient,
-  isPostgresConfigured,
-} from "./database";
+import { getDatabase } from "./database";
 
 type RequestRow = {
   id: string;
@@ -43,12 +38,11 @@ function mapRow(row: RequestRow): ProcurementRequest {
   };
 }
 
-export async function listRequests() {
-  await ensureStorageReady();
-
-  if (isPostgresConfigured()) {
-    const sql = getPostgresClient();
-    const rows = await sql<RequestRow[]>`
+export function listRequests() {
+  const db = getDatabase();
+  const rows = db
+    .prepare(
+      `
       SELECT
         id,
         item_id,
@@ -63,44 +57,19 @@ export async function listRequests() {
         notes,
         created_at
       FROM procurement_requests
-      ORDER BY created_at DESC
-    `;
-
-    return rows.map(mapRow);
-  }
-
-  const db = getDatabase();
-  const rows = db
-    .prepare(
-      `
-        SELECT
-          id,
-          item_id,
-          item_name,
-          category,
-          quantity,
-          required_by,
-          budget_min,
-          budget_max,
-          priority,
-          min_supplier_rating,
-          notes,
-          created_at
-        FROM procurement_requests
-        ORDER BY datetime(created_at) DESC
-      `,
+      ORDER BY datetime(created_at) DESC
+    `,
     )
     .all() as RequestRow[];
 
   return rows.map(mapRow);
 }
 
-export async function getRequestById(id: string) {
-  await ensureStorageReady();
-
-  if (isPostgresConfigured()) {
-    const sql = getPostgresClient();
-    const rows = await sql<RequestRow[]>`
+export function getRequestById(id: string) {
+  const db = getDatabase();
+  const row = db
+    .prepare(
+      `
       SELECT
         id,
         item_id,
@@ -115,40 +84,15 @@ export async function getRequestById(id: string) {
         notes,
         created_at
       FROM procurement_requests
-      WHERE id = ${id}
-      LIMIT 1
-    `;
-
-    return rows[0] ? mapRow(rows[0]) : null;
-  }
-
-  const db = getDatabase();
-  const row = db
-    .prepare(
-      `
-        SELECT
-          id,
-          item_id,
-          item_name,
-          category,
-          quantity,
-          required_by,
-          budget_min,
-          budget_max,
-          priority,
-          min_supplier_rating,
-          notes,
-          created_at
-        FROM procurement_requests
-        WHERE id = ?
-      `,
+      WHERE id = ?
+    `,
     )
     .get(id) as RequestRow | undefined;
 
   return row ? mapRow(row) : null;
 }
 
-export async function createRequest(input: ProcurementRequestDraft) {
+export function createRequest(input: ProcurementRequestDraft) {
   const parsed = requestDraftSchema.parse(input);
   const item = getItemById(parsed.itemId ?? "");
   const freeformItemName = parsed.itemName?.trim();
@@ -172,44 +116,6 @@ export async function createRequest(input: ProcurementRequestDraft) {
     notes: parsed.notes,
     createdAt: new Date().toISOString(),
   };
-
-  await ensureStorageReady();
-
-  if (isPostgresConfigured()) {
-    const sql = getPostgresClient();
-
-    await sql`
-      INSERT INTO procurement_requests (
-        id,
-        item_id,
-        item_name,
-        category,
-        quantity,
-        required_by,
-        budget_min,
-        budget_max,
-        priority,
-        min_supplier_rating,
-        notes,
-        created_at
-      ) VALUES (
-        ${request.id},
-        ${request.itemId},
-        ${request.itemName},
-        ${request.category},
-        ${request.quantity},
-        ${request.requiredBy},
-        ${request.budgetMin},
-        ${request.budgetMax},
-        ${request.priority},
-        ${request.minSupplierRating},
-        ${request.notes},
-        ${request.createdAt}
-      )
-    `;
-
-    return request;
-  }
 
   const db = getDatabase();
   db.prepare(

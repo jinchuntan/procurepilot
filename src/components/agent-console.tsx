@@ -5,15 +5,18 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   ExternalLink,
   LoaderCircle,
-  RotateCcw,
   ShieldAlert,
   SlidersHorizontal,
   TriangleAlert,
 } from "lucide-react";
 import { LiquidMetalButton } from "@/components/liquid-metal-button";
-import { defaultWeights } from "@/lib/data";
-import { formatDate, formatDays, formatPercent } from "@/lib/format";
 import { useLocation } from "@/lib/location-context";
+import { defaultWeights } from "@/lib/data";
+import {
+  formatDate,
+  formatDays,
+  formatPercent,
+} from "@/lib/format";
 import {
   Priority,
   ProcurementAssessment,
@@ -67,6 +70,15 @@ const stepFallbacks: Record<Exclude<InterviewStep, "recommendations">, string> =
   priority: "How urgent is this request: low, medium, high, or critical?",
   rating: "What minimum supplier rating should I keep as the floor?",
   notes: 'Any notes or technical specs I should carry into the recommendation? You can also type "skip".',
+};
+
+const stepOptions: Partial<Record<Exclude<InterviewStep, "recommendations">, string[]>> = {
+  quantity: ["1 unit", "10 units", "100 units"],
+  requiredBy: ["Today", "In 7 days", "In 30 days"],
+  budget: ["Under $5,000", "$5,000 to $20,000", "From $20,000"],
+  priority: ["Low", "High", "Critical"],
+  rating: ["70", "80", "90"],
+  notes: ["skip", "Prioritise fastest delivery", "Eco-friendly suppliers preferred"],
 };
 
 const weightLabels: Array<{ key: keyof Weights; label: string }> = [
@@ -163,58 +175,6 @@ function futureDate(daysFromNow: number) {
   const date = new Date();
   date.setDate(date.getDate() + daysFromNow);
   return date.toISOString().slice(0, 10);
-}
-
-function getSuggestedReplies(step: InterviewStep, draft: InterviewDraft) {
-  if (step === "recommendations") {
-    return [];
-  }
-
-  if (step === "item") {
-    return [
-      "Industrial lubricant for compressors",
-      "RFID shipping label rolls",
-      "Diesel generator injector kit",
-      "Safety gloves for warehouse staff",
-    ];
-  }
-
-  if (step === "quantity") {
-    const normalizedItem = draft.itemName.toLowerCase();
-
-    if (/(glove|mask|ppe|helmet)/.test(normalizedItem)) {
-      return ["200 units", "500 units", "1000 units"];
-    }
-
-    if (/(label|carton|packaging|paper|box)/.test(normalizedItem)) {
-      return ["24 units", "50 units", "120 units"];
-    }
-
-    return ["10 units", "25 units", "50 units"];
-  }
-
-  if (step === "requiredBy") {
-    return ["Tomorrow", futureDate(3), "Next week"];
-  }
-
-  if (step === "budget") {
-    return ["Budget cap 5,000", "3,000 to 4,500", "Under 10,000"];
-  }
-
-  if (step === "priority") {
-    return ["Critical", "High", "Medium"];
-  }
-
-  if (step === "rating") {
-    return ["80", "85", "90"];
-  }
-
-  return [
-    "Equivalent substitute is acceptable",
-    "Keep this with one supplier if possible",
-    "Need delivery before our maintenance shutdown",
-    "skip",
-  ];
 }
 
 function parseQuantity(value: string) {
@@ -411,9 +371,7 @@ function SupplierComparisonTable({
             >
               <td className={`px-3 py-4 ${index === 0 ? "rounded-l-2xl" : ""}`}>
                 <div className="font-semibold">{quote.supplierName}</div>
-                <div
-                  className={`mt-1 text-xs ${index === 0 ? "text-slate-300" : "text-slate-500"}`}
-                >
+                <div className={`mt-1 text-xs ${index === 0 ? "text-slate-300" : "text-slate-500"}`}>
                   {quote.region}
                 </div>
                 {quote.flags.length > 0 ? (
@@ -454,24 +412,6 @@ function SupplierComparisonTable({
   );
 }
 
-function SummaryBlock({
-  title,
-  value,
-  hint,
-}: Readonly<{
-  title: string;
-  value: string;
-  hint: string;
-}>) {
-  return (
-    <div className="rounded-[24px] border border-white/12 bg-white/8 p-4 backdrop-blur-sm">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/55">{title}</p>
-      <p className="mt-3 text-lg font-semibold text-white">{value}</p>
-      <p className="mt-2 text-sm leading-6 text-white/60">{hint}</p>
-    </div>
-  );
-}
-
 export function AgentConsole({
   initialRequestId,
 }: Readonly<{
@@ -481,12 +421,12 @@ export function AgentConsole({
   const formatCurrency = useMemo(() => {
     const currency = location === "Malaysia" ? "MYR" : "SGD";
     const locale = location === "Malaysia" ? "ms-MY" : "en-SG";
-
-    return new Intl.NumberFormat(locale, {
+    const fmt = new Intl.NumberFormat(locale, {
       style: "currency",
       currency,
       maximumFractionDigits: 0,
-    }).format;
+    });
+    return (value: number) => fmt.format(value);
   }, [location]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -688,7 +628,7 @@ export function AgentConsole({
         ...current,
         {
           role: "assistant",
-          text: "I'm building the supplier shortlist now and I'll surface the strongest options below.",
+          text: "I’m building the supplier shortlist now and I’ll surface the strongest options in tiles below.",
         },
       ]);
 
@@ -755,7 +695,7 @@ export function AgentConsole({
           ...current,
           {
             role: "assistant",
-            text: "The recommendation tiles are ready below. Pick one if you want me to open a live negotiation room where you can play the seller and I'll negotiate as the buyer.",
+            text: "The recommendation tiles are ready below. Pick one if you want me to open a live negotiation room where you can play the seller and I’ll negotiate as the buyer.",
           },
         ]);
       }
@@ -787,7 +727,7 @@ export function AgentConsole({
     setInputValue("");
     setError(null);
     setSending(true);
-    window.setTimeout(() => setSending(false), 350);
+    setTimeout(() => setSending(false), 350);
 
     if (step === "item") {
       const nextDraft = { ...draft, itemName: answer };
@@ -954,6 +894,7 @@ export function AgentConsole({
       });
       const data = (await response.json()) as {
         href?: string;
+        room?: { session: { supplierName: string } };
         error?: string;
       };
 
@@ -966,7 +907,7 @@ export function AgentConsole({
         ...current,
         {
           role: "assistant",
-          text: "The live seller room is ready. Open it below, play the supplier, and I'll negotiate there as the buyer until we close the deal.",
+          text: `The live seller room is ready. Open the link below, play the supplier, and I’ll negotiate there as the buyer until we close the deal.`,
         },
       ]);
     } catch (roomError) {
@@ -981,45 +922,39 @@ export function AgentConsole({
     step === "notes"
       ? 'Type your notes or "skip"'
       : step === "recommendations"
-        ? "Ask a follow-up question..."
+        ? "Ask a follow-up question…"
         : "Type your answer here";
-  const currentStepOptions = step !== "recommendations" ? getSuggestedReplies(step, draft) : [];
+
+  const userHasReplied = messages.some((m) => m.role === "user");
+  const chatActive = userHasReplied || assessmentPending;
+  const currentStepOptions = step !== "recommendations" ? (stepOptions[step] ?? []) : [];
+  const isUserTurn = !questionPending && !assessmentPending;
+  const showOptions = isUserTurn && currentStepOptions.length > 0;
+  const showStandaloneInput = !chatActive || (isUserTurn && currentStepOptions.length === 0);
 
   return (
-    <section className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-teal-200/80">
-            Interactive Sourcing Flow
-          </p>
-          <h2 className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">
-            Let ProcurePilot interview the buyer and build the shortlist live.
-          </h2>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => void bootConversation()}
-          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm font-medium text-white/80 transition hover:bg-white/10 hover:text-white"
-        >
-          <RotateCcw className="h-4 w-4" />
-          Restart flow
-        </button>
-      </div>
-
-      <div className="rounded-[30px] border border-white/10 bg-black/35 p-4 shadow-[0_30px_80px_rgba(2,6,23,0.28)] backdrop-blur sm:p-5">
-        <div className="max-h-[360px] space-y-3 overflow-y-auto pr-1">
+    <section className="space-y-2">
+      {/* Chat container — grows in from above the input when user first replies */}
+      <div
+        className={`overflow-hidden rounded-3xl bg-black/40 backdrop-blur-sm transition-all duration-700 ease-in-out ${
+          chatActive
+            ? "max-h-150 translate-y-0 opacity-100"
+            : "max-h-0 -translate-y-2 opacity-0"
+        }`}
+      >
+        {/* Compact scrollable history */}
+        <div className="max-h-47.5 space-y-2.5 overflow-y-auto px-5 pb-3 pt-4 pr-4">
           {messages.map((message, index) => (
             <div
               key={`${message.role}-${index}`}
-              className={message.role === "user" ? "flex justify-end" : "flex justify-start"}
+              className={message.role === "user" ? "flex justify-end" : ""}
             >
               <p
-                className={`max-w-[88%] rounded-[22px] px-4 py-3 text-sm leading-6 ${
+                className={
                   message.role === "assistant"
-                    ? "border border-white/10 bg-white/6 text-white/82"
-                    : "bg-white/14 text-white"
-                }`}
+                    ? "max-w-[90%] text-sm leading-relaxed text-white/80"
+                    : "max-w-[75%] rounded-2xl bg-white/15 px-3.5 py-2 text-sm text-white"
+                }
               >
                 {message.text}
               </p>
@@ -1027,117 +962,83 @@ export function AgentConsole({
           ))}
 
           {questionPending || assessmentPending ? (
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-white/75">
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-              {assessmentPending ? "Building your shortlist..." : "Thinking..."}
+            <div className="flex items-center gap-2 text-xs text-white/65">
+              <LoaderCircle className="h-3 w-3 animate-spin" />
+              {assessmentPending ? "Building your shortlist…" : "Thinking…"}
             </div>
           ) : null}
 
           <div ref={messagesEndRef} />
         </div>
 
-        {currentStepOptions.length > 0 && step !== "recommendations" ? (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {currentStepOptions.map((option, index) => (
+        {/* Multiple-choice options (A / B / C rows + D custom) */}
+        {showOptions ? (
+          <div className="space-y-1.5 border-t border-white/8 px-4 pb-4 pt-3">
+            {currentStepOptions.map((option, i) => (
               <button
                 key={option}
                 type="button"
                 onClick={() => handleOptionClick(option)}
-                disabled={questionPending || assessmentPending}
-                className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-3 py-1.5 text-sm text-white/80 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left transition hover:border-white/25 hover:bg-white/10 active:scale-[0.99]"
               >
-                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/10 text-[11px] font-semibold text-white/60">
-                  {String.fromCharCode(65 + index)}
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-white/20 text-xs font-semibold text-white/65">
+                  {String.fromCharCode(65 + i)}
                 </span>
-                {option}
+                <span className="text-sm text-white/75">{option}</span>
               </button>
             ))}
+
+            {/* D: custom free-text input */}
+            <form
+              onSubmit={handleSubmit}
+              className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2 transition focus-within:border-white/25 focus-within:bg-white/8"
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-white/20 text-xs font-semibold text-white/65">
+                D
+              </span>
+              <input
+                value={inputValue}
+                onChange={(event) => setInputValue(event.target.value)}
+                disabled={questionPending || assessmentPending}
+                placeholder="Type your own…"
+                className="flex-1 bg-transparent py-1 text-sm text-white outline-none placeholder:text-white/25"
+              />
+              <LiquidMetalButton disabled={questionPending || assessmentPending} sending={sending} />
+            </form>
           </div>
         ) : null}
+      </div>
 
-        <form onSubmit={handleSubmit} className="mt-4 flex items-center gap-3 rounded-[24px] border border-white/10 bg-white/6 px-4 py-3">
+      {/* Standalone input — shown on first load or steps with no preset options */}
+      {showStandaloneInput ? (
+        <form
+          onSubmit={handleSubmit}
+          className="flex items-center gap-2 rounded-[22px] border border-white/10 bg-black/50 px-5 py-3 backdrop-blur-sm transition focus-within:border-white/20 focus-within:bg-black/60"
+        >
           <input
             value={inputValue}
             onChange={(event) => setInputValue(event.target.value)}
             disabled={questionPending || assessmentPending}
-            placeholder={inputPlaceholder}
-            className="flex-1 bg-transparent py-1 text-sm text-white outline-none placeholder:text-white/32"
+            placeholder={chatActive ? inputPlaceholder : "What are we procuring today?"}
+            className="flex-1 bg-transparent py-1 text-sm text-white outline-none placeholder:text-white/30"
           />
-          <LiquidMetalButton disabled={questionPending || assessmentPending} sending={sending} />
+          <LiquidMetalButton
+            disabled={questionPending || assessmentPending}
+            sending={sending}
+          />
         </form>
-      </div>
+      ) : null}
 
       {error ? (
-        <div className="rounded-[20px] border border-rose-300/40 bg-rose-500/20 px-4 py-3 text-sm text-rose-100">
+        <div className="rounded-[18px] border border-rose-300/40 bg-rose-500/20 px-4 py-3 text-sm text-rose-200 backdrop-blur-sm">
           {error}
         </div>
       ) : null}
 
       {assessment ? (
-        <div className="space-y-5">
-          <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-            <div className="rounded-[28px] border border-white/10 bg-black/35 p-5 backdrop-blur">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-white/55">
-                Procurement Brief
-              </p>
-              <h3 className="mt-3 font-[family-name:var(--font-display)] text-2xl text-white">
-                {assessment.request.itemName}
-              </h3>
-              <p className="mt-3 text-sm leading-6 text-white/70">{assessment.summary}</p>
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <SummaryBlock
-                  title="Required by"
-                  value={formatDate(assessment.request.requiredBy)}
-                  hint="Target date collected during the interview flow."
-                />
-                <SummaryBlock
-                  title="Budget ceiling"
-                  value={formatCurrency(assessment.request.budgetMax)}
-                  hint="Current budget envelope used in scoring."
-                />
-                <SummaryBlock
-                  title="Priority"
-                  value={assessment.request.priority}
-                  hint="Urgency fit changes the ranking and fallback logic."
-                />
-                <SummaryBlock
-                  title="Notes"
-                  value={assessment.request.notes || "No extra notes"}
-                  hint="Extra context stays attached to the recommendation set."
-                />
-              </div>
-            </div>
-
-            <div className="rounded-[28px] border border-white/10 bg-white/92 p-5 text-slate-950 shadow-[0_24px_60px_rgba(15,23,42,0.12)]">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
-                Best Overall Supplier
-              </p>
-              <h3 className="mt-3 font-[family-name:var(--font-display)] text-2xl">
-                {assessment.recommendations.overall.supplier.supplierName}
-              </h3>
-              <p className="mt-3 text-sm leading-6 text-slate-600">
-                {assessment.recommendations.overall.reason}
-              </p>
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-[20px] border border-slate-200 bg-slate-50 p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Total cost</p>
-                  <p className="mt-2 font-semibold text-slate-950">
-                    {formatCurrency(assessment.recommendations.overall.supplier.totalCost)}
-                  </p>
-                </div>
-                <div className="rounded-[20px] border border-slate-200 bg-slate-50 p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Lead time</p>
-                  <p className="mt-2 font-semibold text-slate-950">
-                    {formatDays(assessment.recommendations.overall.supplier.leadTimeDays)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-3">
+          {/* 2×2 recommendation tiles */}
+          <div className="grid gap-3 sm:grid-cols-2">
             {recommendationEntries.map(({ key, entry }) => {
               const selected = selectedRecommendationKey === key;
               const isRoomOpen = selected && !!negotiationRoomHref;
@@ -1145,73 +1046,79 @@ export function AgentConsole({
               return (
                 <div
                   key={key}
-                  className={`flex flex-col rounded-[28px] border p-5 transition ${
+                  className={`flex flex-col rounded-2xl border p-4 backdrop-blur-sm transition ${
                     selected
-                      ? "border-white/28 bg-white/12 text-white"
-                      : "border-white/10 bg-black/30 text-white hover:border-white/18 hover:bg-black/35"
+                      ? "border-white/35 bg-white/12"
+                      : "border-white/12 bg-black/35 hover:border-white/20"
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/60">
+                  {/* Header row */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-white/70">
                         {entry.label}
                       </p>
-
-                      <div className="flex items-center gap-3">
-                        <span
-                          className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl text-sm font-semibold ${
-                            selected ? "bg-white/14 text-white" : "bg-white text-slate-950"
-                          }`}
-                        >
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-xs font-bold text-white">
                           {supplierMonogram(entry.supplier.supplierName)}
                         </span>
-
-                        <div>
-                          <p className="text-lg font-semibold">{entry.supplier.supplierName}</p>
-                          <p className="mt-1 text-sm text-white/58">
-                            {entry.supplier.region} | {entry.supplier.country}
-                          </p>
-                        </div>
+                        <p className="text-sm font-semibold text-white">
+                          {entry.supplier.supplierName}
+                        </p>
                       </div>
                     </div>
-
-                    <span className="inline-flex rounded-full border border-white/12 bg-white/8 px-3 py-1 text-sm font-semibold text-white/80">
+                    <span className="shrink-0 rounded-full border border-white/15 bg-white/8 px-2.5 py-0.5 text-xs font-semibold text-white/70">
                       {entry.supplier.finalScore}
                     </span>
                   </div>
 
-                  <p className="mt-4 text-sm leading-7 text-white/72">{entry.reason}</p>
-
-                  <div className="mt-4 flex flex-wrap gap-3 text-sm text-white/60">
-                    <span>{formatCurrency(entry.supplier.totalCost)}</span>
+                  {/* Key stats */}
+                  <div className="mt-3 flex items-center gap-3 text-xs text-white/55">
+                    <span className="font-medium text-white/80">
+                      {formatCurrency(entry.supplier.totalCost)}
+                    </span>
+                    <span className="text-white/25">·</span>
                     <span>{formatDays(entry.supplier.leadTimeDays)}</span>
-                    <span>{entry.supplier.riskLevel} risk</span>
+                    <span className="text-white/25">·</span>
+                    <span
+                      className={
+                        entry.supplier.riskLevel === "High"
+                          ? "text-rose-400"
+                          : entry.supplier.riskLevel === "Medium"
+                            ? "text-amber-400"
+                            : "text-emerald-400"
+                      }
+                    >
+                      {entry.supplier.riskLevel} risk
+                    </span>
                   </div>
 
+                  {/* Negotiation room link (once opened) */}
                   {isRoomOpen ? (
                     <Link
-                      href={negotiationRoomHref}
-                      className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-teal-300 transition hover:text-teal-200"
+                      href={negotiationRoomHref!}
+                      className="mt-3 flex items-center gap-1.5 text-xs text-teal-400 hover:text-teal-300"
                     >
-                      <ExternalLink className="h-4 w-4" />
+                      <ExternalLink className="h-3 w-3" />
                       Open negotiation room
                     </Link>
                   ) : null}
 
-                  <div className="mt-auto flex gap-2 pt-5">
+                  {/* Action buttons */}
+                  <div className="mt-auto flex gap-2 pt-3">
                     <button
                       type="button"
                       onClick={() => void handleOpenNegotiationRoom(key)}
                       disabled={recommendationPending}
-                      className="flex-1 rounded-full border border-white/12 bg-white/6 px-4 py-2 text-sm font-medium text-white/80 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      className="flex-1 rounded-lg border border-white/15 bg-white/6 py-2 text-xs font-medium text-white/70 transition hover:bg-white/12 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      {selected && recommendationPending ? "Opening..." : "Negotiate"}
+                      {selected && recommendationPending ? "Opening…" : "Negotiate"}
                     </button>
                     <button
                       type="button"
                       onClick={() => void handleOpenNegotiationRoom(key)}
                       disabled={recommendationPending}
-                      className="flex-1 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="flex-1 rounded-lg bg-white/90 py-2 text-xs font-semibold text-slate-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Buy Now
                     </button>
@@ -1221,170 +1128,113 @@ export function AgentConsole({
             })}
           </div>
 
+          {/* Advanced Analysis toggle */}
           <button
             type="button"
-            onClick={() => setShowAnalysis((current) => !current)}
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm font-medium text-white/80 transition hover:bg-white/10 hover:text-white"
+            onClick={() => setShowAnalysis((c) => !c)}
+            className="flex w-full items-center justify-center gap-1.5 py-1 text-xs text-white transition hover:text-white/70"
           >
-            {showAnalysis ? "Hide comparison details" : "Show comparison details"}
+            <span>{showAnalysis ? "Hide" : "Advanced Analysis"}</span>
+            <span className={`transition-transform duration-200 ${showAnalysis ? "rotate-180" : ""}`}>
+              ▾
+            </span>
+            {assessment.warnings.length > 0 && !showAnalysis ? (
+              <span className="ml-1 rounded-full bg-amber-500/30 px-1.5 py-0.5 text-[10px] text-amber-300">
+                {assessment.warnings.length} risk
+              </span>
+            ) : null}
           </button>
 
+          {/* Advanced Analysis panel */}
           {showAnalysis ? (
-            <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="space-y-4">
-                <div className="rounded-[28px] border border-white/10 bg-white/92 p-5 text-slate-950 shadow-[0_24px_60px_rgba(15,23,42,0.12)]">
-                  <div className="flex items-start gap-3">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                      <ShieldAlert className="h-5 w-5" />
-                    </span>
-                    <div>
-                      <h3 className="font-[family-name:var(--font-display)] text-xl">
-                        Supplier Comparison
-                      </h3>
-                      <p className="mt-1 text-sm text-slate-600">
-                        Ranked shortlist generated during the conversation flow.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-5">
-                    <SupplierComparisonTable
-                      assessment={assessment}
-                      formatCurrency={formatCurrency}
-                    />
-                  </div>
-                </div>
-
-                <div className="rounded-[28px] border border-white/10 bg-white/92 p-5 text-slate-950 shadow-[0_24px_60px_rgba(15,23,42,0.12)]">
-                  <div className="flex items-start gap-3">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                      <SlidersHorizontal className="h-5 w-5" />
-                    </span>
-                    <div>
-                      <h3 className="font-[family-name:var(--font-display)] text-xl">
-                        Decision Weights
-                      </h3>
-                      <p className="mt-1 text-sm text-slate-600">
-                        Reweight the shortlist without leaving the current workflow.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-5 space-y-4">
-                    {weightLabels.map((entry) => (
-                      <label key={entry.key} className="block space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="font-medium text-slate-700">{entry.label}</span>
-                          <span className="font-semibold text-slate-950">{weights[entry.key]}</span>
-                        </div>
-
-                        <input
-                          type="range"
-                          min={0}
-                          max={40}
-                          value={weights[entry.key]}
-                          onChange={(event) =>
-                            setWeights((current) => ({
-                              ...current,
-                              [entry.key]: Number(event.target.value),
-                            }))
-                          }
-                          className="h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-200 accent-teal-500"
-                        />
-                      </label>
-                    ))}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setWeights(defaultWeights)}
-                    className="mt-5 rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-                  >
-                    Reset balanced preset
-                  </button>
-                </div>
+            <div className="space-y-3 rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm">
+              {/* Supplier comparison table */}
+              <div>
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-white/70">
+                  Supplier Comparison
+                </p>
+                <SupplierComparisonTable assessment={assessment} formatCurrency={formatCurrency} />
               </div>
 
-              <div className="space-y-4">
-                <div className="rounded-[28px] border border-white/10 bg-white/92 p-5 text-slate-950 shadow-[0_24px_60px_rgba(15,23,42,0.12)]">
-                  <div className="flex items-start gap-3">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                      <ShieldAlert className="h-5 w-5" />
-                    </span>
-                    <div>
-                      <h3 className="font-[family-name:var(--font-display)] text-xl">
-                        Risk Insights
-                      </h3>
-                      <p className="mt-1 text-sm text-slate-600">
-                        Disruption signals surfaced only after the shortlist was scored.
-                      </p>
-                    </div>
-                  </div>
+              {/* Decision weights */}
+              <div className="border-t border-white/8 pt-3">
+                <p className="mb-3 text-[10px] font-semibold uppercase tracking-widest text-white/70">
+                  Decision Weights
+                </p>
+                <div className="space-y-2.5">
+                  {weightLabels.map((entry) => (
+                    <label key={entry.key} className="flex items-center gap-3">
+                      <span className="w-20 shrink-0 text-xs text-white/55">{entry.label}</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={40}
+                        value={weights[entry.key]}
+                        onChange={(event) =>
+                          setWeights((current) => ({
+                            ...current,
+                            [entry.key]: Number(event.target.value),
+                          }))
+                        }
+                        className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-white/15 accent-teal-400"
+                      />
+                      <span className="w-6 text-right text-xs font-semibold text-white/60">
+                        {weights[entry.key]}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWeights(defaultWeights)}
+                  className="mt-2 text-xs text-white/50 hover:text-white transition"
+                >
+                  Reset defaults
+                </button>
+              </div>
 
-                  <div className="mt-5 space-y-3">
+              {/* Risk insights */}
+              {assessment.riskInsights.length > 0 ? (
+                <div className="border-t border-white/8 pt-3">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-white/70">
+                    Risk Insights
+                  </p>
+                  <div className="space-y-2">
                     {assessment.riskInsights.map((insight) => (
-                      <div
-                        key={insight.key}
-                        className="rounded-[22px] border border-slate-200 bg-slate-50 p-4"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="font-semibold text-slate-900">{insight.label}</p>
-                          <span
-                            className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${riskBadge(
-                              insight.severity,
-                            )}`}
-                          >
-                            {insight.severity}
-                          </span>
+                      <div key={insight.key} className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-medium text-white">{insight.label}</p>
+                          <p className="mt-0.5 text-xs text-white/70">{insight.description}</p>
                         </div>
-                        <p className="mt-2 text-sm leading-6 text-slate-600">
-                          {insight.description}
+                        <span
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${riskBadge(insight.severity)}`}
+                        >
+                          {insight.severity}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Substitutes */}
+              {assessment.substitutes.length > 0 ? (
+                <div className="border-t border-white/8 pt-3">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-white/70">
+                    Substitutes
+                  </p>
+                  <div className="space-y-2">
+                    {assessment.substitutes.map((sub) => (
+                      <div key={sub.itemId} className="text-xs">
+                        <p className="font-medium text-white/75">{sub.itemName}</p>
+                        <p className="text-white/65">
+                          {sub.topSupplier} · {sub.region} · {formatDays(sub.leadTimeDays)}
                         </p>
                       </div>
                     ))}
                   </div>
                 </div>
-
-                <div className="rounded-[28px] border border-white/10 bg-white/92 p-5 text-slate-950 shadow-[0_24px_60px_rgba(15,23,42,0.12)]">
-                  <div className="flex items-start gap-3">
-                    <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                      <TriangleAlert className="h-5 w-5" />
-                    </span>
-                    <div>
-                      <h3 className="font-[family-name:var(--font-display)] text-xl">
-                        Substitutes
-                      </h3>
-                      <p className="mt-1 text-sm text-slate-600">
-                        Alternatives appear only when the shortlist looks risky or late.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-5 space-y-3">
-                    {assessment.substitutes.length ? (
-                      assessment.substitutes.map((substitute) => (
-                        <div
-                          key={substitute.itemId}
-                          className="rounded-[22px] border border-slate-200 bg-slate-50 p-4"
-                        >
-                          <p className="font-semibold text-slate-900">{substitute.itemName}</p>
-                          <p className="mt-1 text-sm text-slate-600">
-                            {substitute.topSupplier} | {substitute.region} |{" "}
-                            {formatDays(substitute.leadTimeDays)}
-                          </p>
-                          <p className="mt-3 text-sm leading-6 text-slate-600">
-                            {substitute.rationale}
-                          </p>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="rounded-[22px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-800">
-                        No substitute escalation is needed for the current shortlist.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+              ) : null}
             </div>
           ) : null}
         </div>

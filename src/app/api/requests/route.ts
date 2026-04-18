@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 
 export async function GET() {
   return NextResponse.json({
-    requests: await listRequests(),
+    requests: listRequests(),
   });
 }
 
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   try {
     const payload = await request.json();
     const parsed = requestDraftSchema.parse(payload);
-    const created = await createRequest(parsed);
+    const created = createRequest(parsed);
 
     return NextResponse.json(
       {

@@ -17,7 +17,7 @@ export async function assessRequestById(
   requestId: string,
   weights?: Partial<Weights>,
 ) {
-  const request = await getRequestById(requestId);
+  const request = getRequestById(requestId);
 
   if (!request) {
     throw new Error(`Request "${requestId}" was not found.`);
@@ -43,7 +43,7 @@ export async function negotiateRecommendationByRequestId(
   recommendationKey: RecommendationKey,
   weights?: Partial<Weights>,
 ) {
-  const request = await getRequestById(requestId);
+  const request = getRequestById(requestId);
 
   if (!request) {
     throw new Error(`Request "${requestId}" was not found.`);

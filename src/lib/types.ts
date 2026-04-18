@@ -130,12 +130,6 @@ export interface RecommendationResult {
   reason: string;
 }
 
-export interface LiveSellerLink {
-  label: string;
-  url: string;
-  description: string;
-}
-
 export interface RecommendationBundle {
   overall: RecommendationResult;
   lowCost: RecommendationResult;
@@ -212,7 +206,7 @@ export interface NegotiationResult {
   transcript: NegotiationTurn[];
 }
 
-export type NegotiationSessionStatus = "open" | "closed" | "accepted" | "rejected";
+export type NegotiationSessionStatus = "open" | "closed";
 
 export interface NegotiationRoomMessage {
   id: string;
@@ -241,53 +235,6 @@ export interface NegotiationRoom {
   request: ProcurementRequest;
   recommendation: RecommendationResult;
   messages: NegotiationRoomMessage[];
-}
-
-export type WhatsAppNegotiationDelivery =
-  | "drafted"
-  | "sent"
-  | "waiting_reply"
-  | "deal_ready"
-  | "accepted"
-  | "rejected";
-
-export interface WhatsAppNegotiationStatus {
-  sessionId?: string;
-  requestId: string;
-  recommendationKey: RecommendationKey;
-  supplierName: string;
-  phoneNumber: string;
-  delivery: WhatsAppNegotiationDelivery;
-  headline: string;
-  detail: string;
-  latestBuyerMessage: string;
-  whatsappUrl?: string;
-  canAutoSend: boolean;
-  actionRequired?: string;
-}
-
-export type EmailNegotiationDelivery =
-  | "drafted"
-  | "waiting_reply"
-  | "deal_ready"
-  | "accepted"
-  | "rejected";
-
-export interface EmailNegotiationStatus {
-  sessionId?: string;
-  requestId: string;
-  recommendationKey: RecommendationKey;
-  supplierName: string;
-  senderEmail: string;
-  recipientEmail: string;
-  delivery: EmailNegotiationDelivery;
-  headline: string;
-  detail: string;
-  subject: string;
-  latestBuyerMessage: string;
-  composeUrl?: string;
-  canAutoSend: boolean;
-  actionRequired?: string;
 }
 
 export interface SampleRequestTemplate {
