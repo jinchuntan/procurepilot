@@ -1,0 +1,18 @@
+
+> procurepilot@0.1.0 dev
+> next dev --hostname 127.0.0.1 --port 3000
+
+▲ Next.js 16.2.4 (Turbopack)
+- Local:         http://127.0.0.1:3000
+- Network:       http://127.0.0.1:3000
+✓ Ready in 629ms
+Creating turbopack project {
+  dir: 'C:\\Users\\nigel\\OneDrive\\Desktop\\Codex\\procurepilot',
+  testMode: true
+}
+
+○ Compiling / ...
+ GET / 200 in 4.1s (next.js: 3.5s, application-code: 521ms)
+ GET / 200 in 212ms (next.js: 11ms, application-code: 201ms)
+ GET /request 200 in 776ms (next.js: 718ms, application-code: 58ms)
+ GET / 200 in 55ms (next.js: 8ms, application-code: 47ms)
